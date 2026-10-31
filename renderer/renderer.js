@@ -759,6 +759,13 @@ els.searchForm.addEventListener('submit', async (e) => {
     return;
   }
   renderSearchResults(result.results || []);
+  if (result.error) {
+    setSearchMessage(
+      result.error +
+        (result.results && result.results.length ? '' : ' Sin resultados.'),
+      'error'
+    );
+  }
 });
 
 els.selectAllBtn.addEventListener('click', () => {
@@ -816,6 +823,7 @@ els.copyDoBtn.addEventListener('click', async () => {
   if (result.attachments) parts.push(`${result.attachments} archivo(s)`);
   let extra = '';
   if (result.failed) extra = ` (${result.failed} archivo(s) sin descargar)`;
+  if (result.folder) extra += ` · Archivos en ${result.folder}`;
   setStatus(`Copiado al portapapeles: ${parts.join(', ')}.${extra}`, 'ok');
 });
 

@@ -399,6 +399,7 @@ async function searchIssuesForCopy(config, query) {
   if (!text) throw new Error('Escribe una clave de tarea o una descripcion');
   const baseUrl = normalizeBaseUrl(config.baseUrl);
 
+  let notice = '';
   const keyMatch = text.match(/^([A-Za-z][A-Za-z0-9_]*-\d+)$/);
   if (keyMatch) {
     try {
@@ -406,10 +407,11 @@ async function searchIssuesForCopy(config, query) {
         config,
         `/rest/api/3/issue/${keyMatch[1].toUpperCase()}?fields=summary,status,issuetype,updated`
       );
-      return [searchResult(issue, baseUrl)];
+      return { results: [searchResult(issue, baseUrl)] };
     } catch (err) {
       if (err.status !== 404) throw err;
-      // La clave no existe: se continua con la busqueda por texto
+      // La clave no existe: se avisa y se permite buscar igualmente por texto
+      notice = `La tarea ${keyMatch[1].toUpperCase()} no existe; se busca como texto.`;
     }
   }
 
@@ -420,7 +422,10 @@ async function searchIssuesForCopy(config, query) {
     ['summary', 'status', 'issuetype', 'updated'],
     20
   );
-  return (search.issues || []).map((issue) => searchResult(issue, baseUrl));
+  return {
+    results: (search.issues || []).map((issue) => searchResult(issue, baseUrl)),
+    error: notice || undefined,
+  };
 }
 
 async function fetchIssueComments(config, issueKey) {
@@ -689,6 +694,7 @@ async function copyIssueToClipboard(config, issueKey, selection) {
     downloaded: localPaths.size,
     failed,
     chars: markdown.length,
+    folder: wantedIds.size ? dir : '',
   };
 }
 
@@ -735,11 +741,15 @@ ipcMain.handle('jira:notifications', async (_event, config) => {
 
 ipcMain.handle('jira:searchIssues', async (_event, payload) => {
   try {
-    const results = await searchIssuesForCopy(
+    const found = await searchIssuesForCopy(
       payload && payload.config,
       payload && payload.query
     );
-    return { ok: true, results };
+    return {
+      ok: true,
+      results: found.results,
+      ...(found.error ? { error: found.error } : {}),
+    };
   } catch (err) {
     return { ok: false, error: err.message };
   }
