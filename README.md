@@ -37,6 +37,7 @@ El token se guarda en texto plano en `config.json` dentro de la carpeta de datos
 | Filtros | No leídas, leídas y todas, con contadores |
 | Estado de lectura | Se guarda en el equipo (`localStorage`), no en Jira |
 | Abrir en Jira | Al pulsar una tarjeta se abre el comentario en el navegador |
+| Buscar y copiar | Buscador de tareas por clave o texto y copia al portapapeles, en Markdown, de las pestañas y comentarios elegidos, con imágenes y archivos descargados localmente |
 | Actualizaciones | Comprobación automática cada 6 horas en la versión empaquetada |
 
 ## Scripts
@@ -46,8 +47,27 @@ El token se guarda en texto plano en `config.json` dentro de la carpeta de datos
 | `npm start` | Abre la app en modo desarrollo |
 | `npm run pack` | Genera la app sin instalador en `dist/` |
 | `npm run dist` | Genera el instalador NSIS y la versión portable en `dist/` |
+| `npm run check:adf` | Comprueba el conversor ADF→Markdown (13 aserciones) |
+| `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira simulado (13 aserciones) |
 | `npm run serve:dist` | Sirve `dist/` por HTTP para el actualizador. Usa `PORT` (por defecto 8080) |
 | `npx electron scripts/make-icon.js` | Regenera `assets/icon.png` y `assets/icon.ico` desde `assets/jira.svg` |
+
+## Generar el instalador
+
+`npm run dist` genera en `dist/` el instalador `NotiJira Setup <versión>.exe` (NSIS, asistido y por usuario) y la versión portable `NotiJira <versión>.exe`. Antes de compilarlo, sube la `version` de `package.json` si quieres que el nombre lleve la nueva.
+
+En Windows hay **un requisito del sistema**: al preparar sus herramientas, electron-builder extrae un archivador que contiene enlaces simbólicos. Si tu usuario no tiene privilegio para crearlos, el build falla siempre con:
+
+```text
+ERROR: Cannot create symbolic link : El cliente no dispone de un privilegio requerido
+```
+
+Aplica **una** de las dos opciones y vuelve a lanzar `npm run dist` (no hace falta limpiar nada):
+
+1. Activar el **Modo de Desarrollador** (una vez): Ajustes → Sistema → Para desarrolladores → Modo de desarrollador. Seleccionarlo pide administrador.
+2. O ejecutar la terminal **como Administrador** y lanzar `npm run dist` desde ahí.
+
+Las descargas fallidas dejan restos en `%LOCALAPPDATA%\electron-builder\Cache\winCodeSign`; son inofensivos y se sobrescriben en el siguiente intento.
 
 ## Actualizaciones automáticas
 

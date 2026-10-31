@@ -20,6 +20,19 @@
       </div>
       <div class="actions">
         <button
+          id="searchBtn"
+          class="btn btn-secondary btn-icon"
+          disabled
+          title="Buscar tarea"
+          aria-label="Buscar tarea"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"
+            />
+          </svg>
+        </button>
+        <button
           id="refreshBtn"
           class="btn btn-secondary btn-icon"
           disabled
@@ -133,6 +146,68 @@
             <button type="submit" class="btn btn-primary">Guardar</button>
           </div>
         </form>
+      </div>
+    </div>
+
+    <div id="searchModal" class="modal-overlay hidden">
+      <div class="modal">
+        <h2>Buscar tarea</h2>
+        <form id="searchForm">
+          <label>
+            Clave o descripcion
+            <input
+              id="searchInput"
+              type="text"
+              placeholder="CLIN-506 o texto de la tarea"
+              autocomplete="off"
+            />
+            <small
+              >Si escribes una clave (PROY-123) se abre directamente. Si no,
+              busca en el resumen y la descripcion de todas las tareas
+              visibles.</small
+            >
+          </label>
+          <div id="searchMessage" class="form-message"></div>
+          <div id="searchResults" class="search-results hidden"></div>
+          <div class="modal-actions">
+            <div class="spacer"></div>
+            <button type="button" id="searchCancelBtn" class="btn btn-ghost">
+              Cancelar
+            </button>
+            <button type="submit" id="searchSubmitBtn" class="btn btn-primary">
+              Buscar
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div id="copyModal" class="modal-overlay hidden">
+      <div class="modal modal-wide">
+        <h2 id="copyTitle">Copiar tarea</h2>
+        <p id="copySubtitle" class="copy-subtitle">Cargando...</p>
+        <div class="copy-toolbar">
+          <button type="button" id="selectAllBtn" class="btn btn-ghost">
+            Seleccionar todo
+          </button>
+          <button type="button" id="selectNoneBtn" class="btn btn-ghost">
+            Ninguno
+          </button>
+        </div>
+        <div id="copySections" class="copy-list"></div>
+        <h3 class="copy-group-title">Comentarios</h3>
+        <div id="copyComments" class="copy-list"></div>
+        <p id="copyAttachmentsNote" class="copy-note hidden"></p>
+        <div id="copyMessage" class="form-message"></div>
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button type="button" id="copyCancelBtn" class="btn btn-ghost">
+            Cancelar
+          </button>
+          <button type="button" id="copyDoBtn" class="btn btn-primary">
+            Copiar al portapapeles
+          </button>
+        </div>
       </div>
     </div>
 

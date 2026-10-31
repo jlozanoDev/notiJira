@@ -16,6 +16,25 @@ const els = {
   formMessage: document.getElementById('formMessage'),
   testBtn: document.getElementById('testBtn'),
   cancelBtn: document.getElementById('cancelBtn'),
+  searchBtn: document.getElementById('searchBtn'),
+  searchModal: document.getElementById('searchModal'),
+  searchForm: document.getElementById('searchForm'),
+  searchInput: document.getElementById('searchInput'),
+  searchMessage: document.getElementById('searchMessage'),
+  searchResults: document.getElementById('searchResults'),
+  searchCancelBtn: document.getElementById('searchCancelBtn'),
+  searchSubmitBtn: document.getElementById('searchSubmitBtn'),
+  copyModal: document.getElementById('copyModal'),
+  copyTitle: document.getElementById('copyTitle'),
+  copySubtitle: document.getElementById('copySubtitle'),
+  selectAllBtn: document.getElementById('selectAllBtn'),
+  selectNoneBtn: document.getElementById('selectNoneBtn'),
+  copySections: document.getElementById('copySections'),
+  copyComments: document.getElementById('copyComments'),
+  copyAttachmentsNote: document.getElementById('copyAttachmentsNote'),
+  copyMessage: document.getElementById('copyMessage'),
+  copyCancelBtn: document.getElementById('copyCancelBtn'),
+  copyDoBtn: document.getElementById('copyDoBtn'),
 };
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
@@ -40,6 +59,9 @@ const state = {
   audioContext: null,
   readIds: loadReadIds(),
   filter: 'all',
+  copyData: null,
+  selectedSections: new Set(),
+  selectedComments: new Set(),
 };
 
 function normalizeBaseUrl(url) {
@@ -416,6 +438,7 @@ async function connectAndLoad() {
     return;
   }
   els.refreshBtn.disabled = false;
+  els.searchBtn.disabled = false;
   await loadNotifications({ silent: true });
   startAutoRefresh();
 }
@@ -445,6 +468,7 @@ function showNotConfigured() {
   els.cards.innerHTML = '';
   els.userInfo.textContent = 'Sin conectar';
   els.refreshBtn.disabled = true;
+  els.searchBtn.disabled = true;
 }
 
 document.querySelectorAll('.filter-tab').forEach((tab) => {
@@ -498,6 +522,310 @@ els.configForm.addEventListener('submit', async (e) => {
 });
 
 els.refreshBtn.addEventListener('click', () => loadNotifications());
+
+// ---------------------------------------------------------------------------
+// Buscador de tareas y modal de copia para OpenCode
+// ---------------------------------------------------------------------------
+
+function setSearchMessage(message, type) {
+  els.searchMessage.textContent = message || '';
+  els.searchMessage.className = 'form-message ' + (type || '');
+}
+
+function setCopyMessage(message, type) {
+  els.copyMessage.textContent = message || '';
+  els.copyMessage.className = 'form-message ' + (type || '');
+}
+
+function openSearchModal() {
+  setSearchMessage('', '');
+  els.searchResults.innerHTML = '';
+  els.searchResults.classList.add('hidden');
+  els.searchInput.value = '';
+  els.searchModal.classList.remove('hidden');
+  els.searchInput.focus();
+}
+
+function closeSearchModal() {
+  els.searchModal.classList.add('hidden');
+}
+
+function closeCopyModal() {
+  els.copyModal.classList.add('hidden');
+  state.copyData = null;
+}
+
+function renderSearchResults(results) {
+  els.searchResults.innerHTML = '';
+
+  if (!results.length) {
+    els.searchResults.classList.add('hidden');
+    setSearchMessage('Sin resultados. Prueba con otra descripcion.', 'error');
+    return;
+  }
+
+  els.searchResults.classList.remove('hidden');
+  setSearchMessage(
+    `${results.length} resultado${results.length === 1 ? '' : 's'}.`,
+    'ok'
+  );
+
+  for (const item of results) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'search-result';
+
+    const key = document.createElement('span');
+    key.className = 'issue-key';
+    key.textContent = item.key;
+    row.appendChild(key);
+
+    const summary = document.createElement('span');
+    summary.className = 'search-result-summary';
+    summary.textContent = item.summary;
+    row.appendChild(summary);
+
+    if (item.status) {
+      const status = document.createElement('span');
+      status.className = 'badge';
+      status.textContent = item.status;
+      row.appendChild(status);
+    }
+
+    const updated = document.createElement('span');
+    updated.className = 'search-result-date';
+    updated.textContent = formatDate(item.updated);
+    row.appendChild(updated);
+
+    row.addEventListener('click', () => {
+      closeSearchModal();
+      openCopyModal(item.key, item.summary);
+    });
+
+    els.searchResults.appendChild(row);
+  }
+}
+
+function copyRow(label, preview, checked, disabled, onChange) {
+  const row = document.createElement('label');
+  row.className = 'copy-row' + (disabled ? ' disabled' : '');
+
+  const check = document.createElement('input');
+  check.type = 'checkbox';
+  check.className = 'read-check';
+  check.checked = checked;
+  check.disabled = disabled;
+  check.addEventListener('change', () => onChange(check.checked));
+  row.appendChild(check);
+
+  const text = document.createElement('span');
+  text.className = 'copy-row-text';
+
+  const name = document.createElement('span');
+  name.className = 'copy-row-label';
+  name.textContent = label;
+  text.appendChild(name);
+
+  if (preview) {
+    const previewEl = document.createElement('span');
+    previewEl.className = 'copy-row-preview';
+    previewEl.textContent = preview;
+    text.appendChild(previewEl);
+  }
+
+  row.appendChild(text);
+  return row;
+}
+
+function renderCopyLists() {
+  const data = state.copyData;
+  if (!data) return;
+
+  els.copySections.innerHTML = '';
+  els.copyComments.innerHTML = '';
+
+  for (const section of data.sections || []) {
+    const disabled = !!section.empty;
+    const row = copyRow(
+      section.label,
+      disabled ? 'sin contenido' : section.preview,
+      !disabled && state.selectedSections.has(section.id),
+      disabled,
+      (checked) => {
+        if (checked) state.selectedSections.add(section.id);
+        else state.selectedSections.delete(section.id);
+      }
+    );
+    els.copySections.appendChild(row);
+  }
+
+  const comments = data.comments || [];
+  if (!comments.length) {
+    const empty = document.createElement('p');
+    empty.className = 'copy-note';
+    empty.textContent = 'Esta tarea no tiene comentarios.';
+    els.copyComments.appendChild(empty);
+  } else {
+    for (const comment of comments) {
+      const author = comment.author || 'Sin autor';
+      const when = formatDate(comment.created);
+      const row = copyRow(
+        when ? `${author} · ${when}` : author,
+        comment.preview,
+        state.selectedComments.has(comment.id),
+        false,
+        (checked) => {
+          if (checked) state.selectedComments.add(comment.id);
+          else state.selectedComments.delete(comment.id);
+        }
+      );
+      els.copyComments.appendChild(row);
+    }
+  }
+
+  const attachments = data.attachments || [];
+  if (attachments.length) {
+    els.copyAttachmentsNote.textContent = `Se descargaran ${attachments.length} archivo(s) adjunto(s) a la carpeta de la aplicacion para enlazarlos en la copia.`;
+    els.copyAttachmentsNote.classList.remove('hidden');
+  } else {
+    els.copyAttachmentsNote.classList.add('hidden');
+  }
+}
+
+async function openCopyModal(issueKey, summary) {
+  state.copyData = null;
+  state.selectedSections = new Set();
+  state.selectedComments = new Set();
+
+  els.copyTitle.textContent = `Copiar ${issueKey}`;
+  els.copySubtitle.textContent = summary
+    ? `${issueKey} — ${summary} · Cargando...`
+    : 'Cargando...';
+  els.copySections.innerHTML = '';
+  els.copyComments.innerHTML = '';
+  els.copyAttachmentsNote.classList.add('hidden');
+  setCopyMessage('', '');
+  els.copyDoBtn.disabled = true;
+  els.copyModal.classList.remove('hidden');
+
+  const result = await window.api.getIssueCopyData(state.config, issueKey);
+
+  if (!result.ok) {
+    els.copySubtitle.textContent = summary ? `${issueKey} — ${summary}` : issueKey;
+    setCopyMessage('Error al cargar la tarea: ' + result.error, 'error');
+    return;
+  }
+
+  state.copyData = result;
+  for (const section of result.sections || []) {
+    if (!section.empty) state.selectedSections.add(section.id);
+  }
+  for (const comment of result.comments || []) {
+    state.selectedComments.add(comment.id);
+  }
+
+  els.copySubtitle.textContent = `${result.issue.key} — ${result.issue.summary}`;
+  renderCopyLists();
+  els.copyDoBtn.disabled = false;
+}
+
+els.searchBtn.addEventListener('click', openSearchModal);
+els.searchCancelBtn.addEventListener('click', closeSearchModal);
+els.searchModal.addEventListener('click', (e) => {
+  if (e.target === els.searchModal) closeSearchModal();
+});
+
+els.searchForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (!state.config) {
+    setSearchMessage('Configura Jira primero.', 'error');
+    return;
+  }
+  const query = els.searchInput.value.trim();
+  if (!query) {
+    setSearchMessage('Escribe una clave de tarea o una descripcion.', 'error');
+    return;
+  }
+
+  els.searchSubmitBtn.disabled = true;
+  setSearchMessage('Buscando...', '');
+  const result = await window.api.searchIssues(state.config, query);
+  els.searchSubmitBtn.disabled = false;
+
+  if (!result.ok) {
+    els.searchResults.innerHTML = '';
+    els.searchResults.classList.add('hidden');
+    setSearchMessage('Error: ' + result.error, 'error');
+    return;
+  }
+  renderSearchResults(result.results || []);
+  if (result.error) {
+    setSearchMessage(
+      result.error +
+        (result.results && result.results.length ? '' : ' Sin resultados.'),
+      'error'
+    );
+  }
+});
+
+els.selectAllBtn.addEventListener('click', () => {
+  const data = state.copyData;
+  if (!data) return;
+  for (const section of data.sections || []) {
+    if (!section.empty) state.selectedSections.add(section.id);
+  }
+  for (const comment of data.comments || []) {
+    state.selectedComments.add(comment.id);
+  }
+  renderCopyLists();
+});
+
+els.selectNoneBtn.addEventListener('click', () => {
+  state.selectedSections = new Set();
+  state.selectedComments = new Set();
+  renderCopyLists();
+});
+
+els.copyCancelBtn.addEventListener('click', closeCopyModal);
+els.copyModal.addEventListener('click', (e) => {
+  if (e.target === els.copyModal) closeCopyModal();
+});
+
+els.copyDoBtn.addEventListener('click', async () => {
+  const data = state.copyData;
+  if (!data) return;
+
+  const sections = [...state.selectedSections];
+  const comments = [...state.selectedComments];
+  if (!sections.length && !comments.length) {
+    setCopyMessage('Selecciona al menos una seccion o un comentario.', 'error');
+    return;
+  }
+
+  els.copyDoBtn.disabled = true;
+  setCopyMessage('Copiando y descargando archivos...', '');
+  const result = await window.api.copyIssue(state.config, {
+    issueKey: data.issue.key,
+    sections,
+    comments,
+  });
+  els.copyDoBtn.disabled = false;
+
+  if (!result.ok) {
+    setCopyMessage('Error: ' + result.error, 'error');
+    return;
+  }
+
+  closeCopyModal();
+  const parts = [];
+  if (result.sections) parts.push(`${result.sections} seccion(es)`);
+  if (result.comments) parts.push(`${result.comments} comentario(s)`);
+  if (result.attachments) parts.push(`${result.attachments} archivo(s)`);
+  let extra = '';
+  if (result.failed) extra = ` (${result.failed} archivo(s) sin descargar)`;
+  if (result.folder) extra += ` · Archivos en ${result.folder}`;
+  setStatus(`Copiado al portapapeles: ${parts.join(', ')}.${extra}`, 'ok');
+});
 
 async function init() {
   const config = await window.api.getConfig();

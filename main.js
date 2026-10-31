@@ -1,7 +1,8 @@
-const { app, BrowserWindow, ipcMain, shell, Notification } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, Notification, clipboard } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
+const { adfToMarkdown, collectMedia } = require('./adf');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
@@ -210,13 +211,13 @@ async function mapLimit(items, limit, fn) {
   return results;
 }
 
-async function searchIssues(config, jql, fields) {
+async function searchIssues(config, jql, fields, maxResults = 100) {
   try {
     return await jiraRequest(config, '/rest/api/3/search/jql', {
       method: 'POST',
       body: {
         jql,
-        maxResults: 100,
+        maxResults,
         fields,
       },
     });
@@ -225,7 +226,7 @@ async function searchIssues(config, jql, fields) {
 
     const params = new URLSearchParams({
       jql,
-      maxResults: '100',
+      maxResults: String(maxResults),
       fields: fields.join(','),
     });
     return jiraRequest(config, `/rest/api/2/search?${params.toString()}`);
@@ -360,6 +361,343 @@ async function fetchNotifications(config) {
   return fetchMentions(config);
 }
 
+// ---------------------------------------------------------------------------
+// Busqueda y copia de tareas (utilidad "copiar para OpenCode")
+// ---------------------------------------------------------------------------
+
+// Pestañas reales de la instancia, verificadas contra /rest/api/3/field.
+// "Gestion" no existe como campo y se omite a peticion del usuario.
+const COPY_TAB_FIELDS = [
+  { id: 'customfield_10090', label: 'Entrada', kind: 'datetime' },
+  { id: 'customfield_10218', label: 'PreAnálisis', kind: 'adf' },
+  { id: 'customfield_10253', label: 'Contexto', kind: 'adf' },
+  { id: 'customfield_10250', label: 'Análisis Funcional', kind: 'adf' },
+  { id: 'customfield_10450', label: 'Casos de Prueba', kind: 'adf' },
+  { id: 'customfield_10448', label: 'Desglose Funcional', kind: 'adf' },
+  { id: 'customfield_10251', label: 'Análisis Técnico', kind: 'adf' },
+  { id: 'customfield_10481', label: 'QA', kind: 'adf' },
+];
+
+function escapeJqlText(text) {
+  return String(text).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function searchResult(issue, baseUrl) {
+  const fields = issue.fields || {};
+  return {
+    key: issue.key,
+    summary: fields.summary || 'Sin titulo',
+    status: (fields.status && fields.status.name) || '',
+    issuetype: (fields.issuetype && fields.issuetype.name) || '',
+    updated: fields.updated || null,
+    webUrl: `${baseUrl}/browse/${issue.key}`,
+  };
+}
+
+async function searchIssuesForCopy(config, query) {
+  const text = String(query || '').trim();
+  if (!text) throw new Error('Escribe una clave de tarea o una descripcion');
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+
+  let notice = '';
+  const keyMatch = text.match(/^([A-Za-z][A-Za-z0-9_]*-\d+)$/);
+  if (keyMatch) {
+    try {
+      const issue = await jiraRequest(
+        config,
+        `/rest/api/3/issue/${keyMatch[1].toUpperCase()}?fields=summary,status,issuetype,updated`
+      );
+      return { results: [searchResult(issue, baseUrl)] };
+    } catch (err) {
+      if (err.status !== 404) throw err;
+      // La clave no existe: se avisa y se permite buscar igualmente por texto
+      notice = `La tarea ${keyMatch[1].toUpperCase()} no existe; se busca como texto.`;
+    }
+  }
+
+  const jql = `text ~ "${escapeJqlText(text)}" ORDER BY updated DESC`;
+  const search = await searchIssues(
+    config,
+    jql,
+    ['summary', 'status', 'issuetype', 'updated'],
+    20
+  );
+  return {
+    results: (search.issues || []).map((issue) => searchResult(issue, baseUrl)),
+    error: notice || undefined,
+  };
+}
+
+async function fetchIssueComments(config, issueKey) {
+  const comments = [];
+  let startAt = 0;
+
+  for (let page = 0; page < 20; page++) {
+    const data = await jiraRequest(
+      config,
+      `/rest/api/3/issue/${issueKey}/comment?startAt=${startAt}&maxResults=100`
+    );
+    const batch = data.comments || [];
+    comments.push(...batch);
+
+    const total = typeof data.total === 'number' ? data.total : comments.length;
+    if (batch.length === 0 || comments.length >= total) break;
+    startAt += batch.length;
+  }
+
+  return comments;
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value).slice(0, 10);
+  return date.toLocaleString('es-ES', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function previewText(value) {
+  if (value === null || value === undefined || value === '') return '';
+  const text = typeof value === 'string' ? value : adfToText(value);
+  return text.replace(/\s+/g, ' ').trim().slice(0, 160);
+}
+
+async function fetchIssueCopyRaw(config, issueKey) {
+  const key = String(issueKey || '').trim().toUpperCase();
+  if (!/^[A-Z][A-Z0-9_]*-\d+$/.test(key)) throw new Error('Clave de tarea no valida');
+
+  const fieldList = COPY_TAB_FIELDS.map((tab) => tab.id).join(',');
+  const issue = await jiraRequest(
+    config,
+    `/rest/api/3/issue/${key}?fields=summary,status,issuetype,attachment,${fieldList}`
+  );
+  const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const fields = issue.fields || {};
+  const comments = await fetchIssueComments(config, key);
+
+  return {
+    issue: {
+      key,
+      summary: fields.summary || 'Sin titulo',
+      url: `${baseUrl}/browse/${key}`,
+    },
+    values: Object.fromEntries(
+      COPY_TAB_FIELDS.map((tab) => [tab.id, fields[tab.id] ?? null])
+    ),
+    comments,
+    attachments: (fields.attachment || []).map((item) => ({
+      id: String(item.id),
+      filename: item.filename || `adjunto-${item.id}`,
+      size: item.size || 0,
+      url: item.content || '',
+    })),
+    baseUrl,
+  };
+}
+
+function copyDataPreview(raw) {
+  return {
+    issue: raw.issue,
+    sections: COPY_TAB_FIELDS.map((tab) => {
+      const value = raw.values[tab.id];
+      return {
+        id: tab.id,
+        label: tab.label,
+        kind: tab.kind,
+        empty: value === null || value === undefined || value === '',
+        preview:
+          tab.kind === 'datetime' ? formatDateTime(value) : previewText(value),
+      };
+    }),
+    comments: raw.comments.map((comment) => ({
+      id: String(comment.id),
+      author: (comment.author && comment.author.displayName) || '',
+      created: comment.created || '',
+      preview: previewText(comment.body),
+    })),
+    attachments: raw.attachments.map((item) => ({
+      filename: item.filename,
+      size: item.size,
+    })),
+  };
+}
+
+// La modal consulta los datos y el botón de copiar los reutiliza sin repetir
+// peticiones; una sola entrada en caché, válida 10 minutos.
+let copyCache = { key: '', at: 0, raw: null };
+
+async function getCachedCopyRaw(config, issueKey) {
+  const key = String(issueKey || '').trim().toUpperCase();
+  const fresh =
+    copyCache.raw &&
+    copyCache.key === key &&
+    Date.now() - copyCache.at < 10 * 60 * 1000;
+  if (fresh) return copyCache.raw;
+
+  const raw = await fetchIssueCopyRaw(config, key);
+  copyCache = { key, at: Date.now(), raw };
+  return raw;
+}
+
+async function jiraFetchBytes(config, endpoint) {
+  const base = normalizeBaseUrl(config.baseUrl);
+  if (!base) throw new Error('Falta la URL de Jira');
+  if (!config.apiToken) throw new Error('Falta el API token');
+
+  const response = await fetch(`${base}${endpoint}`, {
+    headers: { Authorization: buildAuthHeader(config), Accept: '*/*' },
+  });
+  if (!response.ok) {
+    throw new Error(`Jira respondio ${response.status} al descargar`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
+function safeFilename(name) {
+  const cleaned = String(name || '')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+    .trim();
+  return cleaned || 'archivo';
+}
+
+async function downloadAsset(config, raw, id, dir, usedNames) {
+  const attachment = raw.attachments.find((item) => item.id === String(id));
+  const hint = attachment ? attachment.filename : '';
+  const endpoints = [`/rest/api/3/attachment/content/${id}?redirect=false`];
+  if (hint) {
+    endpoints.push(`/secure/attachment/${id}/${encodeURIComponent(hint)}`);
+  }
+
+  let bytes = null;
+  for (const endpoint of endpoints) {
+    try {
+      bytes = await jiraFetchBytes(config, endpoint);
+      break;
+    } catch (err) {
+      // se prueba el siguiente endpoint
+    }
+  }
+  if (!bytes) return null;
+
+  let name = safeFilename(hint || `adjunto-${id}`);
+  if (usedNames.has(name)) name = `${id}-${name}`;
+  usedNames.add(name);
+
+  fs.mkdirSync(dir, { recursive: true });
+  const dest = path.join(dir, name);
+  fs.writeFileSync(dest, bytes);
+  return dest;
+}
+
+async function copyIssueToClipboard(config, issueKey, selection) {
+  const raw = await getCachedCopyRaw(config, issueKey);
+  const wantedSections = new Set(
+    Array.isArray(selection.sections) ? selection.sections : []
+  );
+  const wantedComments = new Set(
+    Array.isArray(selection.comments) ? selection.comments.map(String) : []
+  );
+
+  const sections = COPY_TAB_FIELDS.filter((tab) => {
+    if (!wantedSections.has(tab.id)) return false;
+    const value = raw.values[tab.id];
+    return value !== null && value !== undefined && value !== '';
+  });
+  const comments = raw.comments.filter((comment) =>
+    wantedComments.has(String(comment.id))
+  );
+
+  if (!sections.length && !comments.length) {
+    throw new Error('No has seleccionado nada para copiar');
+  }
+
+  // Descarga: todos los adjuntos de la tarea (S3) + los medios inline que
+  // aparezcan dentro del contenido seleccionado.
+  const media = { mediaIds: [], attachmentIds: [] };
+  sections.forEach((tab) => {
+    if (raw.values[tab.id] && typeof raw.values[tab.id] === 'object') {
+      collectMedia(raw.values[tab.id], media);
+    }
+  });
+  comments.forEach((comment) => collectMedia(comment.body, media));
+
+  const wantedIds = new Set([
+    ...raw.attachments.map((item) => item.id),
+    ...media.mediaIds,
+    ...media.attachmentIds,
+  ]);
+
+  const dir = path.join(app.getPath('userData'), 'copied', raw.issue.key);
+  const localPaths = new Map();
+  const usedNames = new Set();
+  let failed = 0;
+
+  await mapLimit([...wantedIds], 4, async (id) => {
+    try {
+      const dest = await downloadAsset(config, raw, id, dir, usedNames);
+      if (dest) localPaths.set(String(id), dest);
+      else failed += 1;
+    } catch (err) {
+      failed += 1;
+    }
+  });
+
+  const resolveMedia = (id) => {
+    const local = localPaths.get(String(id));
+    if (local) return local.split(path.sep).join('/');
+    const attachment = raw.attachments.find((item) => item.id === String(id));
+    return attachment && attachment.url ? attachment.url : '';
+  };
+
+  const blocks = [];
+  blocks.push(`# ${raw.issue.key} — ${raw.issue.summary}`);
+  blocks.push(raw.issue.url);
+
+  for (const tab of sections) {
+    const value = raw.values[tab.id];
+    let body = '';
+    if (tab.kind === 'datetime') body = formatDateTime(value);
+    else if (typeof value === 'string') body = value.trim();
+    else body = adfToMarkdown(value, { resolveMedia });
+    if (body) blocks.push(`## ${tab.label}`, body);
+  }
+
+  if (comments.length) {
+    blocks.push('## Comentarios');
+    for (const comment of comments) {
+      const author = (comment.author && comment.author.displayName) || 'Sin autor';
+      blocks.push(`### ${author} · ${formatDateTime(comment.created)}`);
+      blocks.push(adfToMarkdown(comment.body, { resolveMedia }));
+    }
+  }
+
+  if (raw.attachments.length) {
+    blocks.push('## Adjuntos');
+    for (const item of raw.attachments) {
+      const target = resolveMedia(item.id);
+      blocks.push(target ? `- [${item.filename}](<${target}>)` : `- ${item.filename}`);
+    }
+  }
+
+  const markdown = blocks.filter((block) => block !== '').join('\n\n');
+  clipboard.writeText(markdown);
+
+  return {
+    sections: sections.length,
+    comments: comments.length,
+    attachments: raw.attachments.length,
+    downloaded: localPaths.size,
+    failed,
+    chars: markdown.length,
+    folder: wantedIds.size ? dir : '',
+  };
+}
+
 ipcMain.handle('config:get', () => {
   const config = readConfig();
   if (!config) return null;
@@ -396,6 +734,45 @@ ipcMain.handle('jira:notifications', async (_event, config) => {
   try {
     const notifications = await fetchNotifications(config);
     return { ok: true, notifications };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('jira:searchIssues', async (_event, payload) => {
+  try {
+    const found = await searchIssuesForCopy(
+      payload && payload.config,
+      payload && payload.query
+    );
+    return {
+      ok: true,
+      results: found.results,
+      ...(found.error ? { error: found.error } : {}),
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('jira:issueCopyData', async (_event, payload) => {
+  try {
+    const config = payload && payload.config;
+    const raw = await getCachedCopyRaw(config, payload && payload.issueKey);
+    return { ok: true, ...copyDataPreview(raw) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('copy:issue', async (_event, payload) => {
+  try {
+    const result = await copyIssueToClipboard(
+      payload && payload.config,
+      payload && payload.issueKey,
+      payload || {}
+    );
+    return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: err.message };
   }

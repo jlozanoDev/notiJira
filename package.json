@@ -7,7 +7,9 @@
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "serve:dist": "node scripts/serve-dist.js"
+    "serve:dist": "node scripts/serve-dist.js",
+    "check:adf": "node scripts/check-adf.js",
+    "check:copy": "node scripts/check-copy-flow.js"
   },
   "author": "",
   "license": "MIT",
@@ -26,6 +28,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "adf.js",
       "renderer/**/*",
       "assets/**/*",
       "package.json"
