@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';"
+    />
+    <title>NotiJira</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo">N</span>
+        <div>
+          <h1>NotiJira</h1>
+          <p id="userInfo" class="user-info">Sin conectar</p>
+        </div>
+      </div>
+      <div class="actions">
+        <button
+          id="refreshBtn"
+          class="btn btn-secondary btn-icon"
+          disabled
+          title="Actualizar"
+          aria-label="Actualizar"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M17.65 6.35A7.958 7.958 0 0 0 12 4a8 8 0 1 0 7.73 10h-2.08A6 6 0 1 1 12 6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"
+            />
+          </svg>
+        </button>
+        <button
+          id="settingsBtn"
+          class="btn btn-primary btn-icon"
+          title="Configuracion"
+          aria-label="Configuracion"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M19.14 12.94c.04-.3.06-.61.06-.94s-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87a.49.49 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"
+            />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <main class="content">
+      <div id="statusBar" class="status-bar hidden"></div>
+      <div id="filterBar" class="filter-bar hidden">
+        <div class="filter-tabs" role="tablist">
+          <button type="button" class="filter-tab" data-filter="unread">
+            No leidas <span class="filter-count" data-count="unread">0</span>
+          </button>
+          <button type="button" class="filter-tab" data-filter="read">
+            Leidas <span class="filter-count" data-count="read">0</span>
+          </button>
+          <button type="button" class="filter-tab active" data-filter="all">
+            Todas <span class="filter-count" data-count="all">0</span>
+          </button>
+        </div>
+        <button type="button" id="markAllReadBtn" class="btn btn-secondary">
+          Marcar todas como leidas
+        </button>
+      </div>
+      <div id="emptyState" class="empty-state">
+        <h2>Configura tu cuenta de Jira</h2>
+        <p>
+          Pulsa en "Configuracion" e introduce la URL de tu Jira, tu email y tu
+          API token para empezar a ver tus notificaciones.
+        </p>
+      </div>
+      <section id="cards" class="cards" aria-live="polite"></section>
+    </main>
+
+    <div id="modal" class="modal-overlay hidden">
+      <div class="modal">
+        <h2>Configuracion de Jira</h2>
+        <form id="configForm">
+          <label>
+            URL de Jira
+            <input
+              id="baseUrl"
+              type="text"
+              placeholder="https://tuempresa.atlassian.net"
+              required
+            />
+          </label>
+          <label>
+            Email
+            <input
+              id="email"
+              type="email"
+              placeholder="tu@empresa.com"
+            />
+            <small
+              >En Jira Cloud es el email de tu cuenta. Dejalo vacio si usas un
+              Personal Access Token de Jira Server/Data Center.</small
+            >
+          </label>
+          <label>
+            API token / Personal Access Token
+            <input id="apiToken" type="password" placeholder="********" required />
+            <small
+              >Cloud: crea un API token en
+              https://id.atlassian.com/manage-profile/security/api-tokens</small
+            >
+          </label>
+          <label>
+            URL de actualizaciones (opcional)
+            <input
+              id="updateUrl"
+              type="url"
+              placeholder="https://tu-servidor/notijira/"
+            />
+            <small
+              >URL HTTP donde alojas los archivos de la carpeta dist
+              (latest.yml y el .exe). Dejalo vacio para no comprobar
+              actualizaciones.</small
+            >
+          </label>
+          <div id="formMessage" class="form-message"></div>
+          <div class="modal-actions">
+            <button type="button" id="testBtn" class="btn btn-secondary">
+              Probar conexion
+            </button>
+            <div class="spacer"></div>
+            <button type="button" id="cancelBtn" class="btn btn-ghost">
+              Cancelar
+            </button>
+            <button type="submit" class="btn btn-primary">Guardar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>

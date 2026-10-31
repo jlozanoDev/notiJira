@@ -1,0 +1,56 @@
+{
+  "name": "notijira",
+  "version": "1.0.1",
+  "description": "Aplicacion Electron para ver las notificaciones de Jira",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "serve:dist": "node scripts/serve-dist.js"
+  },
+  "author": "",
+  "license": "MIT",
+  "build": {
+    "appId": "com.notijira.app",
+    "productName": "NotiJira",
+    "directories": {
+      "output": "dist"
+    },
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "http://localhost:8080/"
+      }
+    ],
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "win": {
+      "icon": "assets/icon.ico",
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "NotiJira"
+    }
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  }
+}
