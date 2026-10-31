@@ -68,11 +68,11 @@ Secciones ofrecidas (8) y su mapeo real verificado por API en la instancia Cloud
 
 | ID | Specs | Ruta | Estado | Commit |
 | --- | --- | --- | --- | --- |
-| T1 | S2,S3,S4 | inline | done | — |
-| T2 | S1,S2,S3,S4 | inline | done | — |
-| T3 | S1,S2,S4 | inline | done | — |
-| T4 | S1,S2,S3,S5 | inline | done | — |
-| T5 | S1-S5 | inline | done | — |
+| T1 | S2,S3,S4 | inline | done | a71986d |
+| T2 | S1,S2,S3,S4 | inline | done | c207f86 |
+| T3 | S1,S2,S4 | inline | done | c207f86 |
+| T4 | S1,S2,S3,S5 | inline | done | 9589074 |
+| T5 | S1-S5 | inline | done | 9589074 |
 
 - T1: `adf.js` — conversor ADF→Markdown puro (marks, listas, código, tablas, media, mention, status, emoji, enlaces) con resolución de medios a rutas locales; pruebas `node -e`.
 - T2: `main.js` — `TAB_FIELDS`, `jira:searchIssues`, `jira:issueCopyData`, `copy:issue` (descargas + Markdown + clipboard), caché en memoria de los datos de la tarea.
@@ -106,4 +106,5 @@ Ruta declarada: todas `inline` (sin trigger de delegación: el cambio es una sol
 - L3 (evidencia de inspección, 2026-10-31): `/rest/api/3/field` devuelve 130 campos; 8 de 9 pestañas existen como campos propios (tabla de S2); `customfield_10090` "Entrada" es datetime; ningún campo se llama "Gestión"; descripción, comentarios y pestañas vienen en ADF (`{"type":"doc",...}`) vía api/3; JQL ilimitado devuelve 400 en esta instancia (siempre necesita `updated >= -Xd` o `text ~`); la API de issue layout no está expuesta (404 en todos los endpoints probados).
 - L4 (decisiones de diseño): conversor ADF propio en `adf.js` (sin dependencias nuevas, política del repo); clipboard y descargas solo en el proceso principal; encabezado de tarea siempre incluido en la copia (asunción S3/S4).
 - L5 (verificación, 2026-10-31): ver bloque "Evidencia de T5" arriba. Totales: ~1180 líneas autoras en 7 ficheros (`adf.js`, `main.js`, `preload.js`, `index.html`, `renderer.js`, `styles.css`, `scripts/check-adf.js`) más este documento.
-- L6 (pendiente): cadena de entrega (>400 líneas → `ask-on-risk` pregunta una vez) y commits de unidades de trabajo; RDD está activo (global `on`), así que cada commit se evalúa con `gentle-ai review assess`.
+- L6 (entrega): elegida `feature-branch-chain` por el usuario (verbatim de respuesta: "feature-branch-chain (Recomendado)"); 3 commits locales de unidades de trabajo creados en `feature/copy-issue-for-opencode` sin push ni PR. RDD activo (global `on`): evaluación por commit con `gentle-ai review assess --base-ref 2154eda --committed-only` → siempre `risk=medium`, `review_due=false`, `review_due_reason=under_budget` (slice queda pendiente de presupuesto; no abre review).
+- L7 (cierre): Risk de la feature = item 3 (helper compartido `searchIssues` parameterizado con `maxResults`, usado además por el sondeo de notificaciones; default 100 preserva el comportamiento previo) → se escala con `--escalate-item 3` y verificador independiente sobre el diff completo. Prueba de descargas solo con mock (la instancia no tiene adjuntos). DoD manual (`npm start` interactivo) pendiente de ejecución por el usuario.
