@@ -2,6 +2,10 @@
 
 Aplicación de escritorio para Windows que vigila Jira y te avisa cuando te mencionan en un comentario. Todo corre en local: sin servidor propio, sin telemetría y sin cuentas adicionales.
 
+## Descargar
+
+[Descargar NotiJira v1.0.2 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.0.2). En **Assets**, elige `NotiJira Setup 1.0.2.exe` para instalar o `NotiJira 1.0.2.exe` para usar la versión portable.
+
 ## Ruta rápida
 
 1. `npm install`
