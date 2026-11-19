@@ -54,7 +54,7 @@
 | --- | --- | --- | --- | --- |
 | T1 | S1, S2, S4 | inline | done | 4f26c34 |
 | T2 | S1, S4 | inline | done | 4f26c34 |
-| T3 | S3, S4 | inline | done (local); remote publication pending authorization | ad66f8e |
+| T3 | S3, S4 | inline | done — release v1.1.0 publicada | ad66f8e |
 | T4 | S1-S4 | delegated verifier after implementation checks | done | 4f26c34 + ad66f8e |
 
 - T1: GitLab credential setup/removal, authenticated project listing, and project choice.
@@ -80,3 +80,6 @@
 - L12 (descubrimiento del arnés): `check-copy-flow.js` se colgaba si `require('main.js')` fallaba porque el servidor HTTP simulado seguía escuchando; ahora un `finally` lo cierra siempre. Lanzar los checkers desde fuera del repo exige `NODE_PATH` apuntando a los `node_modules` del repo.
 - L13 (T3): versión 1.1.0 en `package.json` y `package-lock.json`, README y docs de agentes actualizados. Los `dist/` generados antes de L11/L12 quedan obsoletos: hay que reconstruirlos antes de publicar.
 - L14 (pendiente): el usuario pidió tag, release en GitHub y subida de instaladores; es una operación remota. Falta su autorización explícita sobre la credencial/sesión de GitHub a usar antes de tocar el remoto.
+- L15 (corrección del verificador, batch único): B1 `config:save` devuelve `{ ok:false, error }` y no escribe nada con una URL de GitLab inválida (la config anterior queda intacta byte a byte); el renderer comprueba `result.ok` y releé `getConfig()`. B2 `restoreCopyModalAfterGitlabSetup()` reabre la copia con el check activo y el panel visible. A1 `comparison.overflow` rechazado; A2 hostname estricto; A3 error de conexión claro en vez de `fetch failed`. A4 (`config:get` devuelve el token) se acepta como patrón heredado de `apiToken`. Sondas fijadas por mutación: reintroducir B1 → `check:copy` 24/26; B2 → `check:renderer` 6/8; A1 → `check:copy` 25/26.
+- L16 (revisión nativa RDD): evaluación escalada a `high` (item 2) sobre `21f9fd9`; consentimiento concedido por el humano; `review start` creó el linaje `review-a449c799828a91cc` con 3 lentes. El `review status` vinculado devolvió `operation_timeout` en `pre_native` (`retry_safe:false`, `next_action:stop`, `mutation_outcome:not_started`): no se relanzó ni se abandonó el linaje, no hay receipt y la entrega siguió la política ordinaria. Reportado como ocurrencia en Gentle AI #6153 (comentario `7021107337`).
+- L17 (publicación, autorización explícita del usuario: sesión `gh` de `jlozanoDev` sobre `jlozanoDev/notiJira`): rama subida, PR #2 creado y fusionado a `main` con merge commit `2d04cba` (árbol idéntico al commit del que se compilaron los instaladores), tag anotado `v1.1.0` → `2d04cba` empujado, release `v1.1.0` publicada (2026-11-19T20:25:00Z) con `NotiJira.Setup.1.1.0.exe` (76.550.989 B) y `NotiJira.1.1.0.exe` (76.335.512 B); ambas URLs devuelven HTTP 200. GitHub convierte los espacios del nombre en puntos, por lo que el README enlaza los nombres con puntos.
