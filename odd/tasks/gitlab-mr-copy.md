@@ -52,10 +52,10 @@
 
 | ID | Specs | Route | Status | Commit |
 | --- | --- | --- | --- | --- |
-| T1 | S1, S2, S4 | inline | done | pending |
-| T2 | S1, S4 | inline | done | pending |
-| T3 | S3, S4 | inline | pending | pending |
-| T4 | S1-S4 | delegated verifier after implementation checks | pending | pending |
+| T1 | S1, S2, S4 | inline | done | 4f26c34 |
+| T2 | S1, S4 | inline | done | 4f26c34 |
+| T3 | S3, S4 | inline | done (local); remote publication pending authorization | ad66f8e |
+| T4 | S1-S4 | delegated verifier after implementation checks | done | 4f26c34 + ad66f8e |
 
 - T1: GitLab credential setup/removal, authenticated project listing, and project choice.
 - T2: branch listing, source/target selection, comparison retrieval, and diff appended to the existing Markdown copy.
