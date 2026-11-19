@@ -431,6 +431,28 @@ body {
   gap: 16px;
 }
 
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.settings-section h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.credential-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .modal label {
   display: flex;
   flex-direction: column;
@@ -462,6 +484,57 @@ body {
   outline: none;
   border-color: var(--primary);
   background: var(--surface);
+}
+
+.modal select {
+  width: 100%;
+  min-width: 0;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 3px;
+  padding: 8px 10px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.modal select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.modal .copy-option {
+  flex: 0 0 auto;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.modal .copy-option input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+}
+
+.gitlab-selection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+.branch-selectors {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .modal small {
@@ -599,6 +672,18 @@ body {
 /* Modal de copia */
 .modal-wide {
   max-width: 640px;
+}
+
+.copy-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.copy-header h2 {
+  margin-bottom: 0;
 }
 
 .copy-subtitle {

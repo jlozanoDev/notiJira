@@ -134,6 +134,36 @@
               actualizaciones.</small
             >
           </label>
+          <section class="settings-section" aria-labelledby="gitlabSettingsTitle">
+            <h3 id="gitlabSettingsTitle">GitLab</h3>
+            <label>
+              URL de GitLab
+              <input
+                id="gitlabUrl"
+                type="url"
+                placeholder="https://gitlab.com"
+                autocomplete="url"
+              />
+            </label>
+            <label>
+              Token de acceso de GitLab
+              <input
+                id="gitlabToken"
+                type="password"
+                placeholder="********"
+                autocomplete="new-password"
+              />
+              <small>Se utiliza para consultar los proyectos y ramas a los que tienes acceso.</small>
+            </label>
+            <div class="credential-actions">
+              <button type="button" id="saveGitlabCredentialsBtn" class="btn btn-secondary">
+                Guardar credenciales de GitLab
+              </button>
+              <button type="button" id="removeGitlabCredentialsBtn" class="btn btn-ghost">
+                Eliminar credenciales de GitLab
+              </button>
+            </div>
+          </section>
           <div id="formMessage" class="form-message"></div>
           <div class="modal-actions">
             <button type="button" id="testBtn" class="btn btn-secondary">
@@ -184,8 +214,37 @@
 
     <div id="copyModal" class="modal-overlay hidden">
       <div class="modal modal-wide">
-        <h2 id="copyTitle">Copiar tarea</h2>
+        <div class="copy-header">
+          <h2 id="copyTitle">Copiar tarea</h2>
+          <label class="copy-option">
+            <input id="includeMrCheckbox" type="checkbox" />
+            <span>Obtener MR</span>
+          </label>
+        </div>
         <p id="copySubtitle" class="copy-subtitle">Cargando...</p>
+        <div id="gitlabSelection" class="gitlab-selection hidden">
+          <label>
+            Proyecto de GitLab
+            <select id="gitlabProjectSelect" disabled>
+              <option value="">Selecciona un proyecto</option>
+            </select>
+          </label>
+          <div class="branch-selectors">
+            <label>
+              Rama de origen
+              <select id="gitlabSourceBranchSelect" disabled>
+                <option value="">Selecciona una rama</option>
+              </select>
+            </label>
+            <label>
+              Rama de destino
+              <select id="gitlabTargetBranchSelect" disabled>
+                <option value="">Selecciona una rama</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="gitlabMessage" class="form-message"></div>
         <div class="copy-toolbar">
           <button type="button" id="selectAllBtn" class="btn btn-ghost">
             Seleccionar todo
