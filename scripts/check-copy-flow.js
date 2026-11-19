@@ -27,9 +27,49 @@ const server = http.createServer((req, res) => {
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const url = req.url;
-    requests.push({ method: req.method, url, body: body || null });
+    requests.push({
+      method: req.method,
+      url,
+      body: body || null,
+      privateToken: req.headers['private-token'] || '',
+    });
     const send = (code, b, t) => { res.writeHead(code, { 'Content-Type': t || 'application/json' }); res.end(b); };
     const json = (o) => send(200, JSON.stringify(o));
+    if (url.startsWith('/api/v4/projects?')) {
+      if (req.headers['private-token'] === 'redirect-test-token') {
+        res.writeHead(302, { Location: '/redirect-target' });
+        res.end();
+        return;
+      }
+      return json([
+        { id: 41, name: 'NotiJira', path_with_namespace: 'equipo/notijira' },
+      ]);
+    }
+    if (url === '/redirect-target') return json([{ id: 99, name: 'Unexpected' }]);
+    if (url.startsWith('/api/v4/projects/41/repository/branches?')) return json([
+      { name: 'main' },
+      { name: 'feature/gitlab-diff' },
+    ]);
+    if (url.startsWith('/api/v4/projects/41/repository/compare?')) {
+      const refs = new URL(url, 'http://localhost').searchParams;
+      if (refs.get('to') === 'feature/empty') return json({ diffs: [], compare_timeout: false });
+      if (refs.get('to') === 'feature/timeout') return json({ diffs: [], compare_timeout: true });
+      if (refs.get('to') === 'feature/overflow') {
+        return json({ diffs: [], overflow: true, compare_timeout: false });
+      }
+      return json({
+        diffs: [{
+          old_path: 'src/app.js',
+          new_path: 'src/app.js',
+          diff: '@@ -1 +1 @@\n-old\n+new',
+          too_large: refs.get('to') === 'feature/large',
+        }],
+        compare_timeout: false,
+      });
+    }
+    if (url.startsWith('/api/v4/projects/404/')) {
+      return send(404, JSON.stringify({ message: 'Project not found' }));
+    }
     if (url.startsWith('/rest/api/3/notifications')) return json({ values: [] });
     if (url.startsWith('/rest/api/3/myself')) return json({ displayName: 'Yo', accountId: 'acc:1' });
     if (url.startsWith('/rest/api/3/search/jql')) {
@@ -174,12 +214,264 @@ check('S4 la respuesta indica la carpeta usada', async (h, config) => {
   });
   const folder = r.folder || r.dir || r.outputDir;
   assert.ok(typeof folder === 'string' && folder.includes('AAA-1'), 'la respuesta debe incluir la carpeta: ' + JSON.stringify(r));
+  assert.ok(!Object.prototype.hasOwnProperty.call(r, 'includeMr'), 'legacy copy response shape stays unchanged');
 });
 
 check('S4 sin seleccion: error explicito', async (h, config) => {
   const r = await h['copy:issue']({}, { config, issueKey: 'AAA-1', sections: [], comments: [] });
   assert.strictEqual(r.ok, false);
   assert.strictEqual(r.error, 'No has seleccionado nada para copiar');
+});
+
+// --- GitLab integration ---------------------------------------------------
+check('GitLab credentials are saved, returned, and removable without losing Jira config', async (h, config) => {
+  const savedConfig = {
+    ...config,
+    email: 'jira@example.com',
+    gitlabUrl: config.baseUrl,
+    gitlabToken: 'gitlab-test-token',
+  };
+  assert.deepStrictEqual(await h['config:save']({}, savedConfig), { ok: true });
+  const persisted = JSON.parse(fs.readFileSync(path.join(stub.__userData, 'config.json'), 'utf8'));
+  assert.strictEqual(persisted.gitlabUrl, config.baseUrl);
+  assert.strictEqual(persisted.gitlabToken, 'gitlab-test-token');
+  assert.strictEqual((await h['config:get']()).gitlabToken, 'gitlab-test-token');
+
+  assert.deepStrictEqual(await h['config:save']({}, {
+    ...savedConfig,
+    gitlabUrl: '',
+    gitlabToken: '',
+  }), { ok: true });
+  const removed = await h['config:get']();
+  assert.strictEqual(removed.gitlabUrl, '');
+  assert.strictEqual(removed.gitlabToken, '');
+  assert.strictEqual(removed.apiToken, config.apiToken, 'Jira token must remain intact');
+});
+
+check('config:save rejects a bad GitLab URL without throwing or discarding Jira config', async (h, config) => {
+  assert.deepStrictEqual(await h['config:save']({}, {
+    ...config,
+    gitlabUrl: 'https://gitlab.example.com',
+    gitlabToken: 'gitlab-test-token',
+  }), { ok: true });
+  const before = fs.readFileSync(path.join(stub.__userData, 'config.json'), 'utf8');
+
+  const result = await h['config:save']({}, {
+    baseUrl: 'https://nuevo-jira.example.com',
+    email: '',
+    apiToken: 'otro-token',
+    updateUrl: '',
+    gitlabUrl: 'http://no-local.example.com',
+    gitlabToken: 'gitlab-test-token',
+  });
+  assert.strictEqual(result.ok, false, 'invalid GitLab URL must be reported, not thrown');
+  assert.match(result.error, /HTTPS/);
+  assert.strictEqual(
+    fs.readFileSync(path.join(stub.__userData, 'config.json'), 'utf8'),
+    before,
+    'a rejected save must leave config.json byte-identical'
+  );
+});
+
+check('config:save rejects a malformed GitLab URL', async (h, config) => {
+  const result = await h['config:save']({}, { ...config, gitlabUrl: 'ht!tp://%%%', gitlabToken: 't' });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.error, /no es valida/);
+});
+
+check('GitLab projects and branches are fetched with the configured token', async (h, config) => {
+  requests = [];
+  const gitlabConfig = { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' };
+  const projects = await h['gitlab:projects']({}, gitlabConfig);
+  assert.strictEqual(projects.ok, true, projects.error);
+  assert.deepStrictEqual(projects.projects.map((project) => project.pathWithNamespace), [
+    'equipo/notijira',
+  ]);
+
+  const branches = await h['gitlab:branches']({}, { config: gitlabConfig, projectId: 41 });
+  assert.strictEqual(branches.ok, true, branches.error);
+  assert.deepStrictEqual(branches.branches.map((branch) => branch.name), [
+    'main',
+    'feature/gitlab-diff',
+  ]);
+  const gitlabRequests = requests.filter((request) => request.url.startsWith('/api/v4/'));
+  assert.strictEqual(gitlabRequests.length, 2);
+  assert.ok(gitlabRequests.every((request) => request.privateToken === 'gitlab-test-token'));
+  assert.ok(gitlabRequests.every((request) => request.url.includes('per_page=100')));
+});
+
+check('copy:issue appends the selected GitLab source-to-target diff after Jira Markdown', async (h, config) => {
+  requests = [];
+  const gitlabConfig = { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' };
+  const result = await h['copy:issue']({}, {
+    config: gitlabConfig,
+    issueKey: 'AAA-1',
+    sections: ['customfield_10090'],
+    comments: [],
+    includeMr: true,
+    gitlab: {
+      projectId: 41,
+      projectName: 'equipo/notijira',
+      sourceBranch: 'feature/gitlab-diff',
+      targetBranch: 'main',
+    },
+  });
+  assert.strictEqual(result.ok, true, result.error);
+  const markdown = stub.__getClipboard();
+  const attachmentIndex = markdown.indexOf('## Adjuntos');
+  const diffIndex = markdown.indexOf('## Diff');
+  assert.ok(attachmentIndex > 0 && diffIndex > attachmentIndex, 'diff must follow the prior Jira copy');
+  assert.ok(markdown.includes('feature/gitlab-diff → main'), markdown);
+  assert.ok(markdown.includes('diff --git a/src/app.js b/src/app.js'), markdown);
+  assert.ok(markdown.includes('@@ -1 +1 @@\n-old\n+new'), markdown);
+  assert.ok(!markdown.includes('gitlab-test-token'), 'GitLab token must never enter copied Markdown');
+  const comparison = requests.find((request) =>
+    request.url.startsWith('/api/v4/projects/41/repository/compare?')
+  );
+  assert.ok(comparison, 'GitLab comparison endpoint must be called');
+  const refs = new URL(comparison.url, 'http://localhost').searchParams;
+  assert.strictEqual(refs.get('from'), 'main', 'target is the comparison base');
+  assert.strictEqual(refs.get('to'), 'feature/gitlab-diff', 'source is the comparison head');
+  assert.strictEqual(comparison.privateToken, 'gitlab-test-token');
+});
+
+check('copy:issue rechaza un GitLab no local y no copia nada', async (h, config) => {
+  stub.__reset();
+  const result = await h['copy:issue']({}, {
+    config: { ...config, gitlabUrl: 'http://gitlab.example.com', gitlabToken: 'gitlab-test-token' },
+    issueKey: 'AAA-1',
+    sections: ['customfield_10090'],
+    comments: [],
+    includeMr: true,
+    gitlab: { projectId: 41, sourceBranch: 'feature/gitlab-diff', targetBranch: 'main' },
+  });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.error, /HTTPS/);
+  assert.strictEqual(stub.__getClipboard(), '', 'un MR rechazado no debe escribir en el portapapeles');
+});
+
+check('GitLab no presenta un diff truncado como si no hubiera diferencias', async (h, config) => {
+  stub.__reset();
+  const result = await h['copy:issue']({}, {
+    config: { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' },
+    issueKey: 'AAA-1',
+    sections: ['customfield_10090'],
+    comments: [],
+    includeMr: true,
+    gitlab: {
+      projectId: 41,
+      projectName: 'equipo/notijira',
+      sourceBranch: 'feature/overflow',
+      targetBranch: 'main',
+    },
+  });
+  assert.strictEqual(result.ok, false, 'un diff incompleto debe fallar, no copiarse vacio');
+  assert.match(result.error, /demasiado grande/);
+  assert.ok(!stub.__getClipboard().includes('No hay diferencias'), 'no debe afirmarse que no hay cambios');
+});
+
+check('GitLab API does not follow redirects while sending credentials', async (h, config) => {
+  requests = [];
+  const result = await h['gitlab:projects']({}, {
+    ...config,
+    gitlabUrl: config.baseUrl,
+    gitlabToken: 'redirect-test-token',
+  });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(requests.filter((request) => request.url.startsWith('/api/v4/')).length, 1);
+  assert.ok(!requests.some((request) => request.url === '/redirect-target'));
+});
+
+check('copy:issue does not overwrite the clipboard when GitLab credentials are missing', async (h, config) => {
+  const result = await h['copy:issue']({}, {
+    config,
+    issueKey: 'AAA-1',
+    sections: ['customfield_10090'],
+    comments: [],
+    includeMr: true,
+    gitlab: { projectId: 41, sourceBranch: 'feature/gitlab-diff', targetBranch: 'main' },
+  });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.error, 'Falta la URL de GitLab');
+  assert.strictEqual(stub.__getClipboard(), '');
+});
+
+check('GitLab empty comparison is appended as an explicit no-diff result', async (h, config) => {
+  const result = await h['copy:issue']({}, {
+    config: { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' },
+    issueKey: 'AAA-1',
+    sections: ['customfield_10090'],
+    comments: [],
+    includeMr: true,
+    gitlab: {
+      projectId: 41,
+      projectName: 'equipo/notijira',
+      sourceBranch: 'feature/empty',
+      targetBranch: 'main',
+    },
+  });
+  assert.strictEqual(result.ok, true, result.error);
+  const markdown = stub.__getClipboard();
+  assert.ok(markdown.includes('## Diff de MR'), markdown);
+  assert.ok(markdown.includes('No hay diferencias entre las ramas seleccionadas.'), markdown);
+});
+
+check('GitLab timeout and incomplete diffs fail without copying partial output', async (h, config) => {
+  for (const sourceBranch of ['feature/timeout', 'feature/large']) {
+    stub.__reset();
+    const result = await h['copy:issue']({}, {
+      config: { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' },
+      issueKey: 'AAA-1',
+      sections: ['customfield_10090'],
+      comments: [],
+      includeMr: true,
+      gitlab: {
+        projectId: 41,
+        projectName: 'equipo/notijira',
+        sourceBranch,
+        targetBranch: 'main',
+      },
+    });
+    assert.strictEqual(result.ok, false, sourceBranch);
+    assert.match(result.error, /GitLab/);
+    assert.strictEqual(stub.__getClipboard(), '', sourceBranch);
+  }
+});
+
+check('S1/S2 GitLab controls are wired through the preload and prompt for missing credentials', async () => {
+  const html = fs.readFileSync(path.join(REPO, 'renderer', 'index.html'), 'utf8');
+  const renderer = fs.readFileSync(path.join(REPO, 'renderer', 'renderer.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(REPO, 'preload.js'), 'utf8');
+  for (const id of [
+    'gitlabUrl',
+    'gitlabToken',
+    'saveGitlabCredentialsBtn',
+    'removeGitlabCredentialsBtn',
+    'includeMrCheckbox',
+    'gitlabProjectSelect',
+    'gitlabSourceBranchSelect',
+    'gitlabTargetBranchSelect',
+  ]) {
+    assert.ok(html.includes(`id="${id}"`), `missing UI element ${id}`);
+  }
+  assert.ok(preload.includes('getGitlabProjects'), 'project lookup must use the preload bridge');
+  assert.ok(preload.includes('getGitlabBranches'), 'branch lookup must use the preload bridge');
+  assert.ok(renderer.includes('openGitlabSettingsForCopy()'), 'missing credentials must open setup');
+  assert.ok(renderer.includes('option.textContent = labelFor(item)'), 'remote option labels use textContent');
+});
+
+check('S1 the Obtener MR checkbox sits in the copy header next to the title', async () => {
+  const html = fs.readFileSync(path.join(REPO, 'renderer', 'index.html'), 'utf8');
+  const header = html.match(/<div class="copy-header">[\s\S]*?<\/div>/);
+  assert.ok(header, 'the copy header must wrap the title and the checkbox');
+  assert.ok(header[0].includes('id="copyTitle"'), 'the header must contain the title');
+  assert.ok(header[0].includes('id="includeMrCheckbox"'), 'the header must contain the MR checkbox');
+  assert.ok(
+    header[0].indexOf('id="copyTitle"') < header[0].indexOf('id="includeMrCheckbox"'),
+    'the checkbox belongs to the right of the title'
+  );
+  const styles = fs.readFileSync(path.join(REPO, 'renderer', 'styles.css'), 'utf8');
+  assert.ok(/\.copy-header\s*\{[^}]*justify-content:\s*space-between/.test(styles), 'header must right-align the checkbox');
 });
 
 // --- regresion item 6 (ruta de notificaciones) ---------------------------
@@ -195,24 +487,32 @@ check('REGRESION la ruta de notificaciones sigue usando maxResults 100', async (
 });
 
 (async () => {
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  const port = server.address().port;
-  require(path.join(REPO, 'main.js'));
-  const h = stub.__handlers;
-  const config = { baseUrl: 'http://127.0.0.1:' + port, apiToken: 'tok', email: '' };
   let failed = 0;
-  for (const c of checks) {
-    stub.__reset();
-    try {
-      await c.fn(h, config);
-      console.log('  ok  - ' + c.name);
-    } catch (err) {
-      failed += 1;
-      console.log('  FAIL- ' + c.name + ' :: ' + (err && err.message));
+  try {
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const port = server.address().port;
+    require(path.join(REPO, 'main.js'));
+    const h = stub.__handlers;
+    const config = { baseUrl: 'http://127.0.0.1:' + port, apiToken: 'tok', email: '' };
+    for (const c of checks) {
+      stub.__reset();
+      try {
+        await c.fn(h, config);
+        console.log('  ok  - ' + c.name);
+      } catch (err) {
+        failed += 1;
+        console.log('  FAIL- ' + c.name + ' :: ' + (err && err.message));
+      }
     }
+  } catch (err) {
+    failed = checks.length;
+    console.error('CHECK FALLA:', err && err.stack);
+  } finally {
+    // Sin esto, un fallo al cargar main.js dejaria el servidor abierto y el
+    // proceso colgado para siempre.
+    server.close();
+    stub.__reset();
+    console.log(`COPY CHECKS: ${checks.length - failed}/${checks.length} passed`);
+    process.exitCode = failed ? 1 : 0;
   }
-  stub.__reset();
-  server.close();
-  console.log(`COPY CHECKS: ${checks.length - failed}/${checks.length} passed`);
-  process.exitCode = failed ? 1 : 0;
-})().catch((err) => { console.error('CHECK FALLA:', err && err.stack); process.exitCode = 1; });
+})();

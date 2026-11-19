@@ -35,6 +35,150 @@ function normalizeBaseUrl(url) {
   return base;
 }
 
+function normalizeGitLabBaseUrl(url) {
+  const base = normalizeBaseUrl(url);
+  if (!base) return '';
+
+  let parsed;
+  try {
+    parsed = new URL(base);
+  } catch (err) {
+    throw new Error('La URL de GitLab no es valida');
+  }
+  const hostname = (parsed.hostname || '').replace(/^\[|\]$/g, '');
+  const ipLiteral = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
+  const domainName = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(hostname);
+  const localHost = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(parsed.hostname);
+  if (!hostname || (!ipLiteral && !domainName && !localHost)) {
+    throw new Error('La URL de GitLab no es valida');
+  }
+  if (
+    parsed.username ||
+    parsed.password ||
+    (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && localHost))
+  ) {
+    throw new Error('La URL de GitLab debe usar HTTPS y no incluir credenciales');
+  }
+  return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
+}
+
+async function gitlabRequest(config, endpoint) {
+  const base = normalizeGitLabBaseUrl(config && config.gitlabUrl);
+  const token = String((config && config.gitlabToken) || '').trim();
+  if (!base) throw new Error('Falta la URL de GitLab');
+  if (!token) throw new Error('Falta el token de GitLab');
+
+  let response;
+  try {
+    response = await fetch(`${base}/api/v4${endpoint}`, {
+      headers: {
+        'PRIVATE-TOKEN': token,
+        Accept: 'application/json',
+      },
+      redirect: 'error',
+    });
+  } catch (err) {
+    // Un redirect rechazado o un fallo de TLS/red llegan aqui: no se revela el token.
+    throw new Error('No se pudo conectar con GitLab; revisa la URL y la conexion');
+  }
+  if (!response.ok) {
+    const error = new Error(
+      `GitLab respondio ${response.status}. Comprueba la URL, el token y los permisos.`
+    );
+    error.status = response.status;
+    throw error;
+  }
+  return response.json();
+}
+
+async function fetchGitLabPages(config, endpoint) {
+  const results = [];
+  for (let page = 1; page <= 100; page++) {
+    const params = new URLSearchParams({ per_page: '100', page: String(page) });
+    const batch = await gitlabRequest(config, `${endpoint}?${params.toString()}`);
+    if (!Array.isArray(batch)) throw new Error('GitLab devolvio una respuesta no valida');
+    results.push(...batch);
+    if (batch.length < 100) return results;
+  }
+  throw new Error('GitLab devolvio demasiados resultados; limita la lista de proyectos o ramas');
+}
+
+async function getGitLabProjects(config) {
+  const projects = await fetchGitLabPages(config, '/projects');
+  return projects.map((project) => ({
+    id: project.id,
+    name: project.name || '',
+    pathWithNamespace: project.path_with_namespace || project.name || '',
+    webUrl: project.web_url || '',
+  }));
+}
+
+async function getGitLabBranches(config, projectId) {
+  const id = String(projectId || '').trim();
+  if (!id) throw new Error('Selecciona un proyecto de GitLab');
+  const branches = await fetchGitLabPages(
+    config,
+    `/projects/${encodeURIComponent(id)}/repository/branches`
+  );
+  return branches.map((branch) => ({ name: branch.name || '' })).filter((branch) => branch.name);
+}
+
+async function compareGitLabBranches(config, selection) {
+  const projectId = String((selection && selection.projectId) || '').trim();
+  const sourceBranch = String((selection && selection.sourceBranch) || '').trim();
+  const targetBranch = String((selection && selection.targetBranch) || '').trim();
+  if (!projectId || !sourceBranch || !targetBranch) {
+    throw new Error('Selecciona el proyecto y las ramas de origen y destino');
+  }
+
+  const params = new URLSearchParams({
+    from: targetBranch,
+    to: sourceBranch,
+  });
+  const comparison = await gitlabRequest(
+    config,
+    `/projects/${encodeURIComponent(projectId)}/repository/compare?${params.toString()}`
+  );
+  if (comparison.compare_timeout) {
+    throw new Error('GitLab no pudo completar la comparacion entre las ramas');
+  }
+  if (comparison.overflow) {
+    throw new Error('El diff entre las ramas es demasiado grande para GitLab; reduce el rango de commits');
+  }
+  if ((comparison.diffs || []).some((file) => file.too_large || file.collapsed)) {
+    throw new Error('GitLab no devolvio el diff completo de todos los archivos');
+  }
+  return comparison;
+}
+
+function formatGitLabDiff(comparison, selection) {
+  const escapeTitle = (value) =>
+    String(value || '').replace(/[\r\n]+/g, ' ').replace(/[\\`*_{}\[\]()#+.!|>]/g, '\\$&');
+  const projectName = escapeTitle(selection.projectName || selection.projectId);
+  const sourceBranch = escapeTitle(selection.sourceBranch);
+  const targetBranch = escapeTitle(selection.targetBranch);
+  const title =
+    `## Diff de MR — ${projectName} · ${sourceBranch} → ${targetBranch}`;
+  const files = Array.isArray(comparison.diffs) ? comparison.diffs : [];
+  if (!files.length) return [title, 'No hay diferencias entre las ramas seleccionadas.'].join('\n\n');
+
+  const diff = files.map((file) => {
+    const oldPath = file.old_path || file.new_path || '';
+    const newPath = file.new_path || file.old_path || '';
+    const content = String(file.diff || '');
+    if (/^diff --git /m.test(content)) return content;
+    return [
+      `diff --git a/${oldPath} b/${newPath}`,
+      `--- ${file.new_file ? '/dev/null' : `a/${oldPath}`}`,
+      `+++ ${file.deleted_file ? '/dev/null' : `b/${newPath}`}`,
+      content,
+    ].join('\n');
+  }).join('\n');
+  const backtickRuns = diff.match(/`+/g) || [];
+  const fence = '`'.repeat(Math.max(3, ...backtickRuns.map((run) => run.length + 1)));
+  return [title, `${fence}diff\n${diff}\n${fence}`].join('\n\n');
+}
+
 function buildAuthHeader(config) {
   const email = (config.email || '').trim();
   const token = (config.apiToken || '').trim();
@@ -596,6 +740,7 @@ async function downloadAsset(config, raw, id, dir, usedNames) {
 
 async function copyIssueToClipboard(config, issueKey, selection) {
   const raw = await getCachedCopyRaw(config, issueKey);
+  const gitlabSelection = selection.gitlab || {};
   const wantedSections = new Set(
     Array.isArray(selection.sections) ? selection.sections : []
   );
@@ -615,6 +760,9 @@ async function copyIssueToClipboard(config, issueKey, selection) {
   if (!sections.length && !comments.length) {
     throw new Error('No has seleccionado nada para copiar');
   }
+  const gitlabComparison = selection.includeMr
+    ? await compareGitLabBranches(config, gitlabSelection)
+    : null;
 
   // Descarga: todos los adjuntos de la tarea (S3) + los medios inline que
   // aparezcan dentro del contenido seleccionado.
@@ -683,6 +831,9 @@ async function copyIssueToClipboard(config, issueKey, selection) {
       blocks.push(target ? `- [${item.filename}](<${target}>)` : `- ${item.filename}`);
     }
   }
+  if (gitlabComparison) {
+    blocks.push(formatGitLabDiff(gitlabComparison, gitlabSelection));
+  }
 
   const markdown = blocks.filter((block) => block !== '').join('\n\n');
   clipboard.writeText(markdown);
@@ -706,18 +857,52 @@ ipcMain.handle('config:get', () => {
     email: config.email || '',
     apiToken: config.apiToken || '',
     updateUrl: config.updateUrl || '',
+    gitlabUrl: config.gitlabUrl || '',
+    gitlabToken: config.gitlabToken || '',
   };
 });
 
 ipcMain.handle('config:save', (_event, config) => {
-  writeConfig({
-    baseUrl: normalizeBaseUrl(config.baseUrl),
-    email: (config.email || '').trim(),
-    apiToken: (config.apiToken || '').trim(),
-    updateUrl: (config.updateUrl || '').trim(),
-  });
-  configureUpdater();
-  return true;
+  const incoming = config || {};
+  let gitlabUrl;
+  try {
+    gitlabUrl = normalizeGitLabBaseUrl(incoming.gitlabUrl || '');
+  } catch (err) {
+    // Una URL invalida no debe descartar la configuracion de Jira ya guardada.
+    return { ok: false, error: err.message };
+  }
+  try {
+    writeConfig({
+      baseUrl: normalizeBaseUrl(incoming.baseUrl),
+      email: (incoming.email || '').trim(),
+      apiToken: (incoming.apiToken || '').trim(),
+      updateUrl: (incoming.updateUrl || '').trim(),
+      gitlabUrl,
+      gitlabToken: gitlabUrl ? (incoming.gitlabToken || '').trim() : '',
+    });
+    configureUpdater();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('gitlab:projects', async (_event, config) => {
+  try {
+    return { ok: true, projects: await getGitLabProjects(config) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('gitlab:branches', async (_event, payload) => {
+  try {
+    const config = payload && payload.config;
+    const branches = await getGitLabBranches(config, payload && payload.projectId);
+    return { ok: true, branches };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 });
 
 ipcMain.handle('jira:test', async (_event, config) => {

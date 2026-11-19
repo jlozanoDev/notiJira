@@ -1,6 +1,6 @@
 {
   "name": "notijira",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "description": "Aplicacion Electron para ver las notificaciones de Jira",
   "main": "main.js",
   "scripts": {
@@ -9,7 +9,8 @@
     "dist": "electron-builder",
     "serve:dist": "node scripts/serve-dist.js",
     "check:adf": "node scripts/check-adf.js",
-    "check:copy": "node scripts/check-copy-flow.js"
+    "check:copy": "node scripts/check-copy-flow.js",
+    "check:renderer": "node scripts/check-renderer-gitlab.js"
   },
   "author": "",
   "license": "MIT",

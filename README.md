@@ -4,7 +4,7 @@ Aplicación de escritorio para Windows que vigila Jira y te avisa cuando te menc
 
 ## Descargar
 
-[Descargar NotiJira v1.0.2 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.0.2). En **Assets**, elige `NotiJira.Setup.1.0.2.exe` para instalar o `NotiJira.1.0.2.exe` para usar la versión portable.
+[Descargar NotiJira v1.1.0 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.1.0). En **Assets**, elige `NotiJira Setup 1.1.0.exe` para instalar o `NotiJira 1.1.0.exe` para usar la versión portable.
 
 ## Ruta rápida
 
@@ -12,6 +12,7 @@ Aplicación de escritorio para Windows que vigila Jira y te avisa cuando te menc
 2. `npm start`
 3. Pulsa **Configuracion** e introduce la URL de tu Jira, tu email y tu API token.
 4. Pulsa **Probar conexion** y después **Guardar**.
+5. Opcionalmente, configura la URL HTTPS y el token de GitLab en el apartado **GitLab** para incluir diffs de ramas al copiar una tarea.
 
 Desde ese momento la app revisa tus menciones cada 5 minutos y muestra una notificación nativa (con sonido) cuando aparece una nueva.
 
@@ -29,7 +30,13 @@ Desde ese momento la app revisa tus menciones cada 5 minutos y muestra una notif
 
 Con email, la app envía `Basic <email:token>`; sin email, envía `Bearer <token>`.
 
-El token se guarda en texto plano en `config.json` dentro de la carpeta de datos de usuario de la aplicación. No se registra en logs ni se envía a ningún sitio que no sea tu propio Jira.
+El token de Jira se guarda en texto plano en `config.json` dentro de la carpeta de datos de usuario de la aplicación. No se registra en logs ni se envía a ningún sitio que no sea tu propio Jira.
+
+## GitLab
+
+En **Configuracion → GitLab**, introduce la URL HTTPS de tu instancia y un token de acceso con permiso `api`. La aplicación consulta los proyectos accesibles para ese token y, al marcar **Obtener MR** al copiar una tarea, permite elegir el proyecto y las ramas de origen y destino.
+
+El diff de la comparación se añade al final del Markdown copiado. Las credenciales de GitLab se guardan en texto plano junto a la configuración local; puedes eliminarlas desde el mismo apartado. El token se envía únicamente a la URL de GitLab configurada y nunca se incluye en logs ni en el texto copiado. HTTP solo se admite para pruebas en `localhost`.
 
 ## Qué hace
 
@@ -42,6 +49,7 @@ El token se guarda en texto plano en `config.json` dentro de la carpeta de datos
 | Estado de lectura | Se guarda en el equipo (`localStorage`), no en Jira |
 | Abrir en Jira | Al pulsar una tarjeta se abre el comentario en el navegador |
 | Buscar y copiar | Buscador de tareas por clave o texto y copia al portapapeles, en Markdown, de las pestañas y comentarios elegidos, con imágenes y archivos descargados localmente |
+| Diff de GitLab | Al activar **Obtener MR**, permite elegir un proyecto y sus ramas; añade la comparación de origen y destino al final de la copia |
 | Actualizaciones | Comprobación automática cada 6 horas en la versión empaquetada |
 
 ## Scripts
@@ -52,13 +60,14 @@ El token se guarda en texto plano en `config.json` dentro de la carpeta de datos
 | `npm run pack` | Genera la app sin instalador en `dist/` |
 | `npm run dist` | Genera el instalador NSIS y la versión portable en `dist/` |
 | `npm run check:adf` | Comprueba el conversor ADF→Markdown (13 aserciones) |
-| `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira simulado (13 aserciones) |
+| `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira simulado (26 aserciones) |
+| `npm run check:renderer` | Comprueba la parte de GitLab de la modal de copia con el `renderer.js` real y un DOM simulado (8 aserciones) |
 | `npm run serve:dist` | Sirve `dist/` por HTTP para el actualizador. Usa `PORT` (por defecto 8080) |
 | `npx electron scripts/make-icon.js` | Regenera `assets/icon.png` y `assets/icon.ico` desde `assets/jira.svg` |
 
 ## Generar el instalador
 
-`npm run dist` genera en `dist/` el instalador `NotiJira Setup <versión>.exe` (NSIS, asistido y por usuario) y la versión portable `NotiJira <versión>.exe`. Antes de compilarlo, sube la `version` de `package.json` si quieres que el nombre lleve la nueva.
+`npm run dist` genera en `dist/` el instalador `NotiJira Setup <versión>.exe` (NSIS, asistido y por usuario) y la versión portable `NotiJira <versión>.exe`. Antes de compilarlo, actualiza `version` en `package.json` y `package-lock.json`.
 
 En Windows hay **un requisito del sistema**: al preparar sus herramientas, electron-builder extrae un archivador que contiene enlaces simbólicos. Si tu usuario no tiene privilegio para crearlos, el build falla siempre con:
 

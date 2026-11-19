@@ -14,10 +14,10 @@ renderer/index.html + renderer.js + styles.css
         |  window.api  (preload.js, contextBridge)
         |  ipcRenderer.invoke
         v
-main.js — ipcMain.handle, Jira client, notifications, updater
+main.js — ipcMain.handle, Jira and GitLab clients, notifications, updater
         |
         +-- config.json in app.getPath('userData')
-        +-- Jira REST over fetch
+        +-- Jira and GitLab REST over fetch
 ```
 
 The renderer never touches `fs`, `fetch`, or Node APIs. `main.js` owns all I/O.
@@ -27,13 +27,19 @@ The renderer never touches `fs`, `fetch`, or Node APIs. `main.js` owns all I/O.
 | Channel | Preload method | Main handler | Returns |
 | --- | --- | --- | --- |
 | `config:get` | `getConfig()` | reads `config.json` | config object or `null` |
-| `config:save` | `saveConfig(cfg)` | normalizes, writes `config.json`, reconfigures the updater | `true` |
+| `config:save` | `saveConfig(cfg)` | normalizes, writes `config.json`, reconfigures the updater | `{ ok: true }` or `{ ok: false, error }` |
 | `jira:test` | `testConnection(cfg)` | `getMyself` | `{ ok, displayName, accountId }` or `{ ok: false, error }` |
 | `jira:notifications` | `getNotifications(cfg)` | `fetchNotifications` | `{ ok, notifications }` or `{ ok: false, error }` |
+| `gitlab:projects` | `getGitlabProjects(cfg)` | lists projects visible to the configured token | `{ ok, projects }` or `{ ok: false, error }` |
+| `gitlab:branches` | `getGitlabBranches(cfg, projectId)` | lists branches for the selected project | `{ ok, branches }` or `{ ok: false, error }` |
 | `shell:openExternal` | `openExternal(url)` | validates `^https?://`, then `shell.openExternal` | `boolean` |
 | `notify` | `notify(payload)` | native `Notification` | `boolean` |
 
 Handlers never throw to the renderer: they catch and return `{ ok: false, error }`. Keep that shape.
+
+The copy flow can request a GitLab branch comparison through `copy:issue`; GitLab API traffic and clipboard writes stay in the main process. The renderer chooses a project visible to the token, then its source and target branches.
+
+`config:save` returns `{ ok: true }` or `{ ok: false, error }`; it never rejects across IPC. A rejected save leaves `config.json` untouched, so the renderer must check `ok` and keep the settings modal open. After a successful save the renderer re-reads `getConfig()` because the main process normalizes the URLs. If the settings modal was opened from the copy flow (`state.returnToCopyModal`), `restoreCopyModalAfterGitlabSetup()` reopens the copy modal with the GitLab panel visible — do not replace it with a plain `closeModal()`, that leaves the selectors hidden.
 
 ## Jira access
 
@@ -52,6 +58,13 @@ Fallback chains, all intentional:
 Rate limiting: 429 responses retry using `Retry-After` (capped at 30 s), two retries by default.
 
 Mention scan: JQL `comment ~ currentUser() AND updated >= -90d`, retried with `comment ~ "<accountId>"` on 400. Limits: 100 issues, 4 concurrent requests, up to 10 comment pages of 100 per issue.
+
+## GitLab access
+
+- Configure the GitLab instance root URL and an access token with `api` permission. Require HTTPS; HTTP is allowed only for loopback test servers.
+- `main.js` sends the token in the `PRIVATE-TOKEN` header to that configured host and uses `/api/v4/projects`, `/projects/:id/repository/branches`, and `/projects/:id/repository/compare`. Requests reject redirects to avoid forwarding the token.
+- Project and branch lists are paginated in pages of 100. The comparison uses the target branch as `from` and source branch as `to`; its diff is appended after the Jira Markdown.
+- GitLab credentials share `config.json` in `app.getPath('userData')` and are stored in plain text like Jira credentials. Never log either token or include it in copied Markdown.
 
 ## Notification shape
 

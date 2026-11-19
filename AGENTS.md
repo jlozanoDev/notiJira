@@ -31,9 +31,9 @@ There is no test runner and no linter. Verify behavior by running the app; verif
 
 - Never enable `nodeIntegration` or disable `contextIsolation`. Renderer code reaches the main process only through `window.api` defined in `preload.js`.
 - A new renderer capability needs three edits together: an `ipcMain.handle` in `main.js`, a method in `preload.js`, and the call site in `renderer/renderer.js`.
-- Treat all Jira content as untrusted. Build DOM with `createElement` + `textContent`; never interpolate remote data into `innerHTML`.
+- Treat all Jira and GitLab content as untrusted. Build DOM with `createElement` + `textContent`; never interpolate remote data into `innerHTML`.
 - `shell.openExternal` stays restricted to `http:`/`https:` URLs, validated in the main process.
-- The API token is stored in plain text in `app.getPath('userData')/config.json`. Never log it, expose it outside the password field, or commit it.
+- Jira and GitLab API tokens are stored in plain text in `app.getPath('userData')/config.json`. Never log them, expose them outside password fields, or commit them. Send the GitLab token only to the configured GitLab URL.
 - Keep the CSP in `renderer/index.html` working: no inline `<script>`, no remote script or style origins.
 - Anything shipped at runtime must be listed in `build.files` in `package.json`, or it will not be packaged.
 
