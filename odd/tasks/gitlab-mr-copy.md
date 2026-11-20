@@ -99,9 +99,9 @@
 | T6 | S3, S6 | inline | done — release v1.1.1 publicada | d15111f |
 | T7 | S7, S4 | inline | done | ver L27 |
 | T8 | S3, S7 | inline | done — release v1.1.2 publicada | fc70475 |
-| T9 | S8, S4 | inline | done (uncommitted; checks pass) | pending |
-| T10 | S3, S8 | inline | local version/README/build done; remote publication pending explicit authorization | pending |
-| T11 | S4, S8 | delegated verifier after implementation checks | done; no blockers reproduced | pending |
+| T9 | S8, S4 | inline | done | f960abb |
+| T10 | S3, S8 | inline | done — release v1.1.3 publicada | 3104140 |
+| T11 | S4, S8 | delegated verifier after implementation checks | done; no blockers reproduced | f960abb |
 
 - T1: GitLab credential setup/removal, authenticated project listing, and project choice.
 - T2: branch listing, source/target selection, comparison retrieval, and diff appended to the existing Markdown copy.
@@ -165,3 +165,4 @@
 - L44: After the stuck-status correction, `check:copy` 33/33, `check:renderer` 27/27, `check:adf` 13/13, touched-JS `node --check`, and `git diff --check` pass. The initial 1.1.3 build predates the final renderer correction and is superseded.
 - L45: Corrected local rebuild `npm run dist -- --publish never` completed; the shell did not expose a numeric exit code after moving the process to the background. Parent spot-check confirms NSIS 76,553,792 B, portable 76,338,246 B, `latest.yml` version/size/SHA-512 match the NSIS artifact, and the packaged ASAR includes both combo-search markers, `searchGitLabPage`, `COMBO_SEARCH_DEBOUNCE_MS`, and excludes `fetchGitLabPages`/`setSelectOptions`. No tracked files were changed by packaging.
 - L46 (close pending): all v1.1.3 remote publication remains blocked on explicit authorization for the destination, operation, and GitHub credential/session. Real-GitLab interactive DoD is also unverified.
+- L47 (publicación de v1.1.3, autorización explícita del usuario: «mergea contra main y publica la ultima version», con la sesión `gh` de `jlozanoDev` sobre `jlozanoDev/notiJira` ya usada en este repo): comprobado antes de tocar el remoto que `main` era ancestro de `f960abb` y que todas las fuentes tenían fecha anterior al inicio de la compilación de las 21:18, así que `dist/` correspondía al árbol comprometido. Repetidas las comprobaciones: `check:copy` 33/33, `check:renderer` 27/27, `check:adf` 13/13, `node --check` limpio en los 6 JS. Rama `feature/gitlab-default-branches` empujada, PR #5 creado y fusionado a `main` con merge commit `3104140`; `git diff f960abb 3104140` vacío (árbol idéntico al que se compiló). Tag anotado `v1.1.3` → `3104140`, empujado. Release `v1.1.3` publicada (2026-11-20T20:30:35Z) y marcada *Latest* con `NotiJira.Setup.1.1.3.exe` (76.553.792 B) y `NotiJira.1.1.3.exe` (76.338.246 B); ambas URLs devuelven HTTP 200 y los dos binarios declaran `FileVersion`/`ProductVersion` = 1.1.3. GitHub volvió a convertir los espacios en puntos, que es lo que ya enlaza el README. `main` local sincronizado a `3104140` con el árbol limpio. Pendiente del usuario: DoD interactiva con GitLab real y, si se quiere, publicar `latest.yml` + `.blockmap` para usar GitHub como feed del actualizador.
