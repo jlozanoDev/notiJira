@@ -486,22 +486,60 @@ body {
   background: var(--surface);
 }
 
-.modal select {
-  width: 100%;
-  min-width: 0;
-  background: var(--surface);
-  border: 2px solid var(--border);
-  border-radius: 3px;
-  padding: 8px 10px;
-  color: var(--text);
-  font-family: inherit;
-  font-size: 14px;
-  font-weight: 400;
+/* Buscadores con sugerencias (proyecto y ramas de GitLab) */
+.combo {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
-.modal select:focus {
-  outline: none;
-  border-color: var(--primary);
+.modal .combo-input {
+  width: 100%;
+  min-width: 0;
+}
+
+.combo-list {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  max-height: 180px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  list-style: none;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 3px;
+  box-shadow: var(--shadow-3);
+}
+
+.combo-option {
+  padding: 6px 8px;
+  border-radius: 2px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.combo-option:hover,
+.combo-option.active {
+  background: var(--bg-hover, #e9f2ff);
+}
+
+.combo-option.selected {
+  font-weight: 600;
+}
+
+.combo-empty {
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-subtle);
 }
 
 .modal .copy-option {

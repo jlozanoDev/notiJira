@@ -37,7 +37,7 @@ The renderer never touches `fs`, `fetch`, or Node APIs. `main.js` owns all I/O.
 
 Handlers never throw to the renderer: they catch and return `{ ok: false, error }`. Keep that shape.
 
-The copy flow can request a GitLab branch comparison through `copy:issue`; GitLab API traffic and clipboard writes stay in the main process. The renderer chooses a project visible to the token, then its source and target branches.
+The copy flow can request a GitLab branch comparison through `copy:issue`; GitLab API traffic and clipboard writes stay in the main process. The renderer chooses a project visible to the token, then its source and target branches, each through a searchable combobox: suggestions are filtered locally (case-insensitive substring) over the list already fetched, so typing makes no extra requests. Typing an exact label commits it on Enter or blur; copy requires a project plus both branches, and changing the project discards the chosen branches.
 
 `config:save` returns `{ ok: true }` or `{ ok: false, error }`; it never rejects across IPC. A rejected save leaves `config.json` untouched, so the renderer must check `ok` and keep the settings modal open. After a successful save the renderer re-reads `getConfig()` because the main process normalizes the URLs. If the settings modal was opened from the copy flow (`state.returnToCopyModal`), `restoreCopyModalAfterGitlabSetup()` reopens the copy modal with the GitLab panel visible — do not replace it with a plain `closeModal()`, that leaves the selectors hidden.
 

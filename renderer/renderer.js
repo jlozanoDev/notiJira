@@ -38,9 +38,12 @@ const els = {
   copyAttachmentsNote: document.getElementById('copyAttachmentsNote'),
   includeMrCheckbox: document.getElementById('includeMrCheckbox'),
   gitlabSelection: document.getElementById('gitlabSelection'),
-  gitlabProjectSelect: document.getElementById('gitlabProjectSelect'),
-  gitlabSourceBranchSelect: document.getElementById('gitlabSourceBranchSelect'),
-  gitlabTargetBranchSelect: document.getElementById('gitlabTargetBranchSelect'),
+  gitlabProjectInput: document.getElementById('gitlabProjectInput'),
+  gitlabProjectList: document.getElementById('gitlabProjectList'),
+  gitlabSourceBranchInput: document.getElementById('gitlabSourceBranchInput'),
+  gitlabSourceBranchList: document.getElementById('gitlabSourceBranchList'),
+  gitlabTargetBranchInput: document.getElementById('gitlabTargetBranchInput'),
+  gitlabTargetBranchList: document.getElementById('gitlabTargetBranchList'),
   gitlabMessage: document.getElementById('gitlabMessage'),
   copyMessage: document.getElementById('copyMessage'),
   copyCancelBtn: document.getElementById('copyCancelBtn'),
@@ -775,66 +778,217 @@ function renderCopyLists() {
   }
 }
 
-function setGitlabSelectionVisible(visible) {
-  els.gitlabSelection.classList.toggle('hidden', !visible);
-  els.gitlabProjectSelect.disabled = !visible;
-  els.gitlabSourceBranchSelect.disabled = true;
-  els.gitlabTargetBranchSelect.disabled = true;
-  setGitlabMessage('', '');
-  if (!visible) {
-    state.gitlabRequestId += 1;
-    state.gitlabProjects = [];
-    setSelectOptions(
-      els.gitlabProjectSelect,
-      'Selecciona un proyecto',
-      [],
-      () => '',
-      () => ''
-    );
-    setSelectOptions(
-      els.gitlabSourceBranchSelect,
-      'Selecciona una rama',
-      [],
-      () => '',
-      () => ''
-    );
-    setSelectOptions(
-      els.gitlabTargetBranchSelect,
-      'Selecciona una rama',
-      [],
-      () => '',
-      () => ''
-    );
-  }
+// ---------------------------------------------------------------------------
+// Buscadores con sugerencias (proyecto y ramas de GitLab). Filtran localmente
+// la lista ya traida de GitLab: escribir no hace peticiones nuevas.
+// ---------------------------------------------------------------------------
+
+const COMBO_VISIBLE = 12;
+const COMBO_NO_MATCH = 'Sin coincidencias';
+
+function createGitlabCombo(input, list, onChange) {
+  const combo = {
+    input,
+    list,
+    onChange: onChange || null,
+    items: [],
+    shown: [],
+    selected: null,
+    active: -1,
+    open: false,
+  };
+
+  combo.matches = () => {
+    const query = combo.input.value.trim().toLowerCase();
+    const pool = query
+      ? combo.items.filter((item) => item.label.toLowerCase().includes(query))
+      : combo.items;
+    return pool.slice(0, COMBO_VISIBLE);
+  };
+
+  combo.render = () => {
+    combo.list.innerHTML = '';
+    if (!combo.open) {
+      combo.shown = [];
+      combo.active = -1;
+      return;
+    }
+    combo.shown = combo.matches();
+    if (!combo.shown.length) {
+      const empty = document.createElement('li');
+      empty.className = 'combo-empty';
+      empty.textContent = COMBO_NO_MATCH;
+      combo.list.appendChild(empty);
+      combo.active = -1;
+      return;
+    }
+    if (combo.active >= combo.shown.length) combo.active = combo.shown.length - 1;
+    combo.shown.forEach((item, index) => {
+      const option = document.createElement('li');
+      option.className = 'combo-option';
+      if (index === combo.active) option.classList.add('active');
+      if (combo.selected && combo.selected.value === item.value) {
+        option.classList.add('selected');
+      }
+      option.setAttribute('role', 'option');
+      option.setAttribute(
+        'aria-selected',
+        String(!!(combo.selected && combo.selected.value === item.value))
+      );
+      option.textContent = item.label;
+      option.addEventListener('mousedown', (event) => {
+        if (event && event.preventDefault) event.preventDefault();
+        combo.choose(item);
+      });
+      combo.list.appendChild(option);
+    });
+  };
+
+  combo.setOpen = (open) => {
+    combo.open = open;
+    combo.list.classList.toggle('hidden', !open);
+    combo.input.setAttribute('aria-expanded', open ? 'true' : 'false');
+    combo.render();
+  };
+
+  combo.apply = (item) => {
+    combo.selected = item || null;
+    combo.input.value = item ? item.label : '';
+    combo.active = -1;
+  };
+
+  combo.choose = (item) => {
+    if (!item) return;
+    combo.apply(item);
+    combo.setOpen(false);
+    if (combo.onChange) combo.onChange(item);
+  };
+
+  // Confirma el texto escrito solo si coincide exactamente con un elemento.
+  combo.commitTyped = () => {
+    const text = combo.input.value.trim().toLowerCase();
+    if (!text) {
+      if (combo.selected) {
+        combo.apply(null);
+        combo.render();
+      }
+      return null;
+    }
+    const match = combo.items.find((item) => item.label.toLowerCase() === text);
+    if (!match || (combo.selected && combo.selected.value === match.value)) return combo.selected;
+    combo.apply(match);
+    combo.render();
+    if (combo.onChange) combo.onChange(match);
+    return match;
+  };
+
+  combo.setItems = (items) => {
+    combo.items = Array.isArray(items) ? items : [];
+    combo.apply(null);
+    combo.setOpen(false);
+    combo.input.disabled = combo.items.length === 0;
+  };
+
+  combo.reset = () => {
+    combo.items = [];
+    combo.apply(null);
+    combo.setOpen(false);
+    combo.input.disabled = true;
+  };
+
+  combo.input.addEventListener('input', () => {
+    combo.selected = null;
+    combo.active = -1;
+    combo.setOpen(true);
+  });
+  combo.input.addEventListener('focus', () => combo.setOpen(true));
+  combo.input.addEventListener('blur', () => {
+    combo.commitTyped();
+    combo.setOpen(false);
+  });
+  combo.input.addEventListener('keydown', (event) => {
+    const key = event && event.key;
+    if (key === 'ArrowDown' || key === 'ArrowUp') {
+      if (event.preventDefault) event.preventDefault();
+      if (!combo.open) combo.setOpen(true);
+      if (!combo.shown.length) return;
+      const last = combo.shown.length - 1;
+      if (key === 'ArrowDown') combo.active = combo.active < 0 ? 0 : Math.min(combo.active + 1, last);
+      else combo.active = combo.active < 0 ? last : Math.max(combo.active - 1, 0);
+      combo.render();
+      return;
+    }
+    if (key === 'Enter') {
+      if (event.preventDefault) event.preventDefault();
+      if (combo.open && combo.active >= 0 && combo.shown[combo.active]) {
+        combo.choose(combo.shown[combo.active]);
+        return;
+      }
+      const onlyMatch = combo.open && combo.matches().length === 1 ? combo.matches()[0] : null;
+      if (onlyMatch) {
+        combo.choose(onlyMatch);
+        return;
+      }
+      combo.commitTyped();
+      combo.setOpen(false);
+      return;
+    }
+    if (key === 'Escape') {
+      if (event.preventDefault) event.preventDefault();
+      combo.apply(combo.selected);
+      combo.setOpen(false);
+    }
+  });
+
+  combo.setOpen(false);
+  return combo;
 }
 
-function setSelectOptions(select, placeholder, items, valueFor, labelFor) {
-  select.innerHTML = '';
-  const first = document.createElement('option');
-  first.value = '';
-  first.textContent = placeholder;
-  select.appendChild(first);
-  for (const item of items) {
-    const option = document.createElement('option');
-    option.value = valueFor(item);
-    option.textContent = labelFor(item);
-    select.appendChild(option);
+const gitlabProjectCombo = createGitlabCombo(
+  els.gitlabProjectInput,
+  els.gitlabProjectList,
+  (project) => loadGitlabBranches(project.value)
+);
+const gitlabSourceCombo = createGitlabCombo(
+  els.gitlabSourceBranchInput,
+  els.gitlabSourceBranchList
+);
+const gitlabTargetCombo = createGitlabCombo(
+  els.gitlabTargetBranchInput,
+  els.gitlabTargetBranchList
+);
+const gitlabCombos = [gitlabProjectCombo, gitlabSourceCombo, gitlabTargetCombo];
+
+function comboValue(combo) {
+  return combo && combo.selected ? combo.selected.value : '';
+}
+
+function projectLabel(project) {
+  return project.pathWithNamespace || project.name || String(project.id);
+}
+
+function setGitlabSelectionVisible(visible) {
+  els.gitlabSelection.classList.toggle('hidden', !visible);
+  setGitlabMessage('', '');
+  if (visible) {
+    gitlabProjectCombo.reset();
+    gitlabSourceCombo.reset();
+    gitlabTargetCombo.reset();
+    return;
   }
-  select.disabled = items.length === 0;
+  state.gitlabRequestId += 1;
+  state.gitlabProjects = [];
+  gitlabProjectCombo.reset();
+  gitlabSourceCombo.reset();
+  gitlabTargetCombo.reset();
 }
 
 async function loadGitlabProjects() {
   const requestId = ++state.gitlabRequestId;
   state.gitlabProjects = [];
-  setSelectOptions(
-    els.gitlabProjectSelect,
-    'Consultando proyectos...',
-    [],
-    () => '',
-    () => ''
-  );
-  els.gitlabSourceBranchSelect.disabled = true;
-  els.gitlabTargetBranchSelect.disabled = true;
+  gitlabProjectCombo.setItems([]);
+  gitlabSourceCombo.reset();
+  gitlabTargetCombo.reset();
   setGitlabMessage('Consultando proyectos de GitLab...', '');
 
   let result;
@@ -852,16 +1006,12 @@ async function loadGitlabProjects() {
     return;
   }
   state.gitlabProjects = result.projects || [];
-  setSelectOptions(
-    els.gitlabProjectSelect,
-    state.gitlabProjects.length ? 'Selecciona un proyecto' : 'No hay proyectos disponibles',
-    state.gitlabProjects,
-    (project) => String(project.id),
-    (project) => project.pathWithNamespace || project.name
+  gitlabProjectCombo.setItems(
+    state.gitlabProjects.map((project) => ({ value: String(project.id), label: projectLabel(project) }))
   );
   setGitlabMessage(
     state.gitlabProjects.length
-      ? `${state.gitlabProjects.length} proyecto(s) disponible(s).`
+      ? `${state.gitlabProjects.length} proyecto(s). Escribe para filtrar y elige uno de la lista.`
       : 'No se encontraron proyectos accesibles con este token.',
     state.gitlabProjects.length ? 'ok' : 'error'
   );
@@ -869,20 +1019,8 @@ async function loadGitlabProjects() {
 
 async function loadGitlabBranches(projectId) {
   const requestId = ++state.gitlabRequestId;
-  setSelectOptions(
-    els.gitlabSourceBranchSelect,
-    'Consultando ramas...',
-    [],
-    () => '',
-    () => ''
-  );
-  setSelectOptions(
-    els.gitlabTargetBranchSelect,
-    'Consultando ramas...',
-    [],
-    () => '',
-    () => ''
-  );
+  gitlabSourceCombo.reset();
+  gitlabTargetCombo.reset();
   if (!projectId) {
     setGitlabMessage('', '');
     return;
@@ -904,23 +1042,13 @@ async function loadGitlabBranches(projectId) {
     return;
   }
   const branches = result.branches || [];
-  const placeholder = branches.length ? 'Selecciona una rama' : 'No hay ramas disponibles';
-  setSelectOptions(
-    els.gitlabSourceBranchSelect,
-    placeholder,
-    branches,
-    (branch) => branch.name,
-    (branch) => branch.name
-  );
-  setSelectOptions(
-    els.gitlabTargetBranchSelect,
-    placeholder,
-    branches,
-    (branch) => branch.name,
-    (branch) => branch.name
-  );
+  const items = branches.map((branch) => ({ value: branch.name, label: branch.name }));
+  gitlabSourceCombo.setItems(items);
+  gitlabTargetCombo.setItems(items);
   setGitlabMessage(
-    branches.length ? `${branches.length} rama(s) disponible(s).` : 'No se encontraron ramas.',
+    branches.length
+      ? `${branches.length} rama(s). Escribe para filtrar y elige origen y destino.`
+      : 'No se encontraron ramas.',
     branches.length ? 'ok' : 'error'
   );
 }
@@ -984,10 +1112,6 @@ els.includeMrCheckbox.addEventListener('change', () => {
   }
   setGitlabSelectionVisible(true);
   loadGitlabProjects();
-});
-
-els.gitlabProjectSelect.addEventListener('change', () => {
-  loadGitlabBranches(els.gitlabProjectSelect.value);
 });
 
 els.searchBtn.addEventListener('click', openSearchModal);
@@ -1064,21 +1188,25 @@ els.copyDoBtn.addEventListener('click', async () => {
   }
 
   const includeMr = els.includeMrCheckbox.checked;
-  const selectedProject = state.gitlabProjects.find(
-    (project) => String(project.id) === els.gitlabProjectSelect.value
-  );
-  const gitlab = {
-    projectId: els.gitlabProjectSelect.value,
-    projectName: selectedProject ? selectedProject.pathWithNamespace : '',
-    sourceBranch: els.gitlabSourceBranchSelect.value,
-    targetBranch: els.gitlabTargetBranchSelect.value,
-  };
-  if (
-    includeMr &&
-    (!gitlab.projectId || !gitlab.sourceBranch || !gitlab.targetBranch)
-  ) {
-    setGitlabMessage('Selecciona el proyecto y las ramas de origen y destino.', 'error');
-    return;
+  const gitlab = { projectId: '', projectName: '', sourceBranch: '', targetBranch: '' };
+  if (includeMr) {
+    // Un texto escrito solo vale si coincide exacto con un elemento de la lista.
+    gitlabCombos.forEach((combo) => combo.commitTyped());
+    const project = gitlabProjectCombo.selected;
+    const source = gitlabSourceCombo.selected;
+    const target = gitlabTargetCombo.selected;
+    if (!project) {
+      setGitlabMessage('Selecciona un proyecto de GitLab en la lista.', 'error');
+      return;
+    }
+    if (!source || !target) {
+      setGitlabMessage('Selecciona en la lista las ramas de origen y destino.', 'error');
+      return;
+    }
+    gitlab.projectId = project.value;
+    gitlab.projectName = project.label;
+    gitlab.sourceBranch = source.value;
+    gitlab.targetBranch = target.value;
   }
 
   els.copyDoBtn.disabled = true;

@@ -448,16 +448,16 @@ check('S1/S2 GitLab controls are wired through the preload and prompt for missin
     'saveGitlabCredentialsBtn',
     'removeGitlabCredentialsBtn',
     'includeMrCheckbox',
-    'gitlabProjectSelect',
-    'gitlabSourceBranchSelect',
-    'gitlabTargetBranchSelect',
+    'gitlabProjectInput',
+    'gitlabSourceBranchInput',
+    'gitlabTargetBranchInput',
   ]) {
     assert.ok(html.includes(`id="${id}"`), `missing UI element ${id}`);
   }
   assert.ok(preload.includes('getGitlabProjects'), 'project lookup must use the preload bridge');
   assert.ok(preload.includes('getGitlabBranches'), 'branch lookup must use the preload bridge');
   assert.ok(renderer.includes('openGitlabSettingsForCopy()'), 'missing credentials must open setup');
-  assert.ok(renderer.includes('option.textContent = labelFor(item)'), 'remote option labels use textContent');
+  assert.ok(renderer.includes('option.textContent = item.label'), 'remote option labels use textContent');
 });
 
 check('S1 the Obtener MR checkbox sits in the copy header next to the title', async () => {

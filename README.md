@@ -34,7 +34,7 @@ El token de Jira se guarda en texto plano en `config.json` dentro de la carpeta 
 
 ## GitLab
 
-En **Configuracion → GitLab**, introduce la URL HTTPS de tu instancia y un token de acceso con permiso `api`. La aplicación consulta los proyectos accesibles para ese token y, al marcar **Obtener MR** al copiar una tarea, permite elegir el proyecto y las ramas de origen y destino.
+En **Configuracion → GitLab**, introduce la URL HTTPS de tu instancia y un token de acceso con permiso `api`. La aplicación consulta los proyectos accesibles para ese token y, al marcar **Obtener MR** al copiar una tarea, puedes escribir en los buscadores de proyecto, rama de origen y rama de destino: te va sugiriendo las coincidencias (sin distinguir mayúsculas) sobre lo ya cargado, y eliges con un clic o con las flechas + `Enter`. Puedes teclear el nombre completo de una rama y confirmarlo con `Tab`/`Enter`; si el texto no coincide con ninguna, no se toma como selección.
 
 El diff de la comparación se añade al final del Markdown copiado. Las credenciales de GitLab se guardan en texto plano junto a la configuración local; puedes eliminarlas desde el mismo apartado. El token se envía únicamente a la URL de GitLab configurada y nunca se incluye en logs ni en el texto copiado. HTTP solo se admite para pruebas en `localhost`.
 
@@ -49,7 +49,7 @@ El diff de la comparación se añade al final del Markdown copiado. Las credenci
 | Estado de lectura | Se guarda en el equipo (`localStorage`), no en Jira |
 | Abrir en Jira | Al pulsar una tarjeta se abre el comentario en el navegador |
 | Buscar y copiar | Buscador de tareas por clave o texto y copia al portapapeles, en Markdown, de las pestañas y comentarios elegidos, con imágenes y archivos descargados localmente |
-| Diff de GitLab | Al activar **Obtener MR**, permite elegir un proyecto y sus ramas; añade la comparación de origen y destino al final de la copia |
+| Diff de GitLab | Al activar **Obtener MR**, buscas el proyecto y las ramas de origen y destino con sugerencias; añade la comparación de origen y destino al final de la copia |
 | Actualizaciones | Comprobación automática cada 6 horas en la versión empaquetada |
 
 ## Scripts
@@ -61,7 +61,7 @@ El diff de la comparación se añade al final del Markdown copiado. Las credenci
 | `npm run dist` | Genera el instalador NSIS y la versión portable en `dist/` |
 | `npm run check:adf` | Comprueba el conversor ADF→Markdown (13 aserciones) |
 | `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira simulado (26 aserciones) |
-| `npm run check:renderer` | Comprueba la parte de GitLab de la modal de copia con el `renderer.js` real y un DOM simulado (8 aserciones) |
+| `npm run check:renderer` | Comprueba la parte de GitLab de la modal de copia con el `renderer.js` real y un DOM simulado (16 aserciones) |
 | `npm run serve:dist` | Sirve `dist/` por HTTP para el actualizador. Usa `PORT` (por defecto 8080) |
 | `npx electron scripts/make-icon.js` | Regenera `assets/icon.png` y `assets/icon.ico` desde `assets/jira.svg` |
 
