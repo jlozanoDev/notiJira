@@ -34,7 +34,9 @@ El token de Jira se guarda en texto plano en `config.json` dentro de la carpeta 
 
 ## GitLab
 
-En **Configuracion → GitLab**, introduce la URL HTTPS de tu instancia y un token de acceso con permiso `api`. La aplicación consulta los proyectos accesibles para ese token y, al marcar **Obtener MR** al copiar una tarea, puedes escribir en los buscadores de proyecto, rama de origen y rama de destino: te va sugiriendo las coincidencias (sin distinguir mayúsculas) sobre lo ya cargado, y eliges con un clic o con las flechas + `Enter`. Puedes teclear el nombre completo de una rama y confirmarlo con `Tab`/`Enter`; si el texto no coincide con ninguna, no se toma como selección.
+En **Configuracion → GitLab**, introduce la URL HTTPS de tu instancia y un token de acceso con permiso `api`. La aplicación busca en GitLab los proyectos accesibles para ese token y, al marcar **Obtener MR** al copiar una tarea, puedes escribir en los buscadores de proyecto, rama de origen y rama de destino: cada texto se envía a GitLab (parámetro `search`, con retardo de un cuarto de segundo) y sugiere lo que coincida. Se elige con un clic o con las flechas + `Enter`; `Escape` cierra sin perder la elección anterior. Escribir el nombre completo de una rama también vale, siempre que GitLab lo devuelva tal cual.
+
+Cada búsqueda trae una página de 100 resultados. Si GitLab la llena, el aviso te pide que concretes más el texto.
 
 El diff de la comparación se añade al final del Markdown copiado. Las credenciales de GitLab se guardan en texto plano junto a la configuración local; puedes eliminarlas desde el mismo apartado. El token se envía únicamente a la URL de GitLab configurada y nunca se incluye en logs ni en el texto copiado. HTTP solo se admite para pruebas en `localhost`.
 
@@ -60,8 +62,8 @@ El diff de la comparación se añade al final del Markdown copiado. Las credenci
 | `npm run pack` | Genera la app sin instalador en `dist/` |
 | `npm run dist` | Genera el instalador NSIS y la versión portable en `dist/` |
 | `npm run check:adf` | Comprueba el conversor ADF→Markdown (13 aserciones) |
-| `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira simulado (26 aserciones) |
-| `npm run check:renderer` | Comprueba la parte de GitLab de la modal de copia con el `renderer.js` real y un DOM simulado (16 aserciones) |
+| `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira y un GitLab simulados (30 aserciones) |
+| `npm run check:renderer` | Comprueba la parte de GitLab de la modal de copia con el `renderer.js` real y un DOM simulado (23 aserciones) |
 | `npm run serve:dist` | Sirve `dist/` por HTTP para el actualizador. Usa `PORT` (por defecto 8080) |
 | `npx electron scripts/make-icon.js` | Regenera `assets/icon.png` y `assets/icon.ico` desde `assets/jira.svg` |
 

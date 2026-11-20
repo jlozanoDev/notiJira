@@ -59,6 +59,21 @@
 - Elegir proyecto vuelve a cargar las ramas de ese proyecto (misma guarda de respuestas atrasadas que ya existe).
 - Comprobación: sondeos en `npm run check:renderer` para filtrado por texto, sugerencia sin coincidencias, selección por clic y por teclado, valor final enviado a `copy:issue`, y que el panel siga viéndose tras guardar credenciales.
 
+### S7 — Búsqueda de proyecto y ramas en el servidor de GitLab
+
+> "Quiero search, y que saques una nueva version 1.1.2"
+
+- Los buscadores de proyecto, rama origen y rama destino preguntan a GitLab con el parámetro `search` de la API en lugar de filtrar en local la lista completa:
+  - `GET /api/v4/projects?search=<texto>`
+  - `GET /api/v4/projects/:id/repository/branches?search=<texto>`
+- Texto vacío (al abrir) carga la primera página; cada pulsación vuelve a buscar con debounce (250 ms) y solo la primera página de 100. Ya no se recorren todas las páginas, así que desaparece el tope de "demasiados resultados".
+- Cada campo mantiene su propia lista y su propia guarda de respuestas atrasadas: escribir en origen no cambia las sugerencias de destino.
+- Al elegir un proyecto se cargan las ramas por defecto (búsqueda vacía) en ambos campos.
+- La interfaz avisa cuando GitLab devuelve una página completa (hay más resultados): "Se muestran los primeros 100; escribe un texto más concreto."
+- Se conserva lo ya comprometido en S6: elegir con clic o flechas + `Enter`, `Escape` conserva la elección, y un texto solo vale si coincide exacto con una sugerencia.
+- Comprobación: los sondajes del proceso principal afirman que la petición lleva `search=` y que solo se pide la página 1 (y `truncated` con 100); los del renderer afirman debounce (no hay petición antes del retardo), lista servida por el servidor, independencia entre origen y destino y que una respuesta atrasada no pisa la más reciente.
+- Riesgo: item 3 (el payload de los canales IPC `gitlab:projects` y `gitlab:branches` cambia) y item 4 (peticiones por tecla con orden asíncrono).
+
 ## Tasks
 
 | ID | Specs | Route | Status | Commit |
@@ -69,6 +84,8 @@
 | T4 | S1-S4 | delegated verifier after implementation checks | done | 4f26c34 + ad66f8e |
 | T5 | S6, S4 | inline | done | 562cc30 |
 | T6 | S3, S6 | inline | done — release v1.1.1 publicada | d15111f |
+| T7 | S7, S4 | inline | done | ver L27 |
+| T8 | S3, S7 | inline | in progress | pending |
 
 - T1: GitLab credential setup/removal, authenticated project listing, and project choice.
 - T2: branch listing, source/target selection, comparison retrieval, and diff appended to the existing Markdown copy.
@@ -105,3 +122,6 @@
 - L23 (artefactos): compilación delegada (`npm run dist -- --publish never`, worker fresco, sin operaciones remotas) sobre el worktree limpio en `d15111f`; `latest.yml` → `version: 1.1.1` con el sha512/tamaño que coinciden con el instalador subido. Prueba de contenido del paquete: `app.asar` contiene `createGitlabCombo`, `gitlabProjectInput` y `combo-list`, y ya NO contiene `gitlabProjectSelect`, así que los binarios publicados llevan los buscadores. Lección aplicada del intento anterior: no se mutó `package.json` mientras corría la compilación.
 - L24 (revisión nativa RDD): `gentle-ai review assess --base-ref e61bf52 --committed-only` → `risk=medium`, `review_due=false`, `review_due_reason=under_budget` (11 rutas, 895 líneas). No se abrió transacción de review para este slice; queda pendiente de presupuesto. El defecto aguas arriba (#6153, `operation_timeout` en STATUS ligado en repos con `node_modules`) sigue sin toparse: no se relanzó ni se abandonó el linaje anterior `review-a449c799828a91cc`.
 - L25 (pendiente del usuario): DoD interactiva con GitLab real — `npm start` → Configuracion → GitLab → buscar tarea → marcar Obtener MR → escribir en los tres buscadores y pegar la copia en OpenCode para revisar el diff.
+- L26 (petición de la 1.1.2, verbatim): "Quiero search, y que saques una nueva version 1.1.2".
+- L27 (S7, inline, T7): los buscadores consultan a GitLab con `search`. Proceso principal: `searchGitLabPage` (`main.js`) pide `per_page=100&page=1` (+`order_by=name&sort=asc` en proyectos) y devuelve `{ items, truncated }`; `getGitLabProjects(config, search)` y `getGitLabBranches(config, projectId, search)` devuelven `{ truncated, projects|branches }`; los handlers aceptan el payload `{ config, search }` con tolerancia a la forma antigua y responden `{ ok, ..., truncated }`. `preload.js` pasa el término. Renderer: un solo `createGitlabCombo` con `fetchItems`, retardo de 250 ms cancelable por tecla, contador `combo.seq` por campo y `state.gitlabSession` al cerrar el panel, `applyItems` (programático) frente a `applySearchItems` (respuesta de búsqueda, respeta lo escrito), `commitTyped` async que consulta si el campo está cerrado, aviso de página llena y carga compartida de ramas al elegir proyecto. Documentado en `README.md` y `.opencode/instructions.md` (tabla IPC + GitLab access).
+- L28 (pruebas S7, RED→GREEN con evidencia de mutación): sondajes nuevos en `check:copy` (4) y `check:renderer` (7); el DOM simulado gana un reloj falso (`harness.advance`) para gobernar el debounce sin dormir. RED limpio: con los sondajes S7 sobre `HEAD` (v1.1.1) fallan 25/30 en `check:copy` y 17/23 en `check:renderer`, justo los sondajes de búsqueda. GREEN: 30/30 y 23/23, `check:adf` 13/13, `node --check` limpio en `main.js`/`preload.js`/`renderer/renderer.js`. Mutaciones: quitar `search` en el proceso principal → 27/30; quitar la guarda de secuencia → 22/23; poner el retardo a 0 ms → 22/23 (este último fallaba antes: el sondaje se endureció para que el retardo roto se note). Diferencial contra `HEAD`: `copy:issue` con y sin MR (Markdown de 377 caracteres con el diff del MR) y `config:save`/`config:get` dan salida idéntica y el mismo número de peticiones. Riesgo: items 3 (payload/respuesta de `gitlab:projects` y `gitlab:branches`) y 4 (orden asíncrono por tecla). Se refiere a la opción que planteé al responder su pregunta: usar el parámetro `search` de la API de GitLab (confirmado en https://docs.gitlab.com/api/branches/: `search` con `^prefijo`/`sufijo$`, y `regex` RE2 excluyente con `search`) en lugar de descargar todas las ramas y filtrar en local. Nace S7 con T7 (búsqueda en servidor) y T8 (versión, instaladores, README, tag y release de v1.1.2). Rama: `feature/gitlab-server-search` desde `main` (`b8ec8ec`).

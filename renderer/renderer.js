@@ -77,7 +77,7 @@ const state = {
   selectedComments: new Set(),
   gitlabProjects: [],
   returnToCopyModal: false,
-  gitlabRequestId: 0,
+  gitlabSession: 0,
 };
 
 function normalizeBaseUrl(url) {
@@ -779,32 +779,34 @@ function renderCopyLists() {
 }
 
 // ---------------------------------------------------------------------------
-// Buscadores con sugerencias (proyecto y ramas de GitLab). Filtran localmente
-// la lista ya traida de GitLab: escribir no hace peticiones nuevas.
+// Buscadores de proyecto y ramas de GitLab. El texto se envia a GitLab con el
+// parametro `search` (con retardo) y se muestra lo que devuelve, en lugar de
+// descargar todas las paginas y filtrar aqui.
 // ---------------------------------------------------------------------------
 
 const COMBO_VISIBLE = 12;
 const COMBO_NO_MATCH = 'Sin coincidencias';
+const COMBO_PAGE_SIZE = 100;
+const COMBO_SEARCH_DEBOUNCE_MS = 250;
 
-function createGitlabCombo(input, list, onChange) {
+function createGitlabCombo(input, list, options) {
   const combo = {
     input,
     list,
-    onChange: onChange || null,
+    label: options.label,
+    fetchItems: options.fetchItems,
+    onChange: options.onChange || null,
     items: [],
     shown: [],
     selected: null,
     active: -1,
     open: false,
+    seq: 0,
+    timer: null,
   };
 
-  combo.matches = () => {
-    const query = combo.input.value.trim().toLowerCase();
-    const pool = query
-      ? combo.items.filter((item) => item.label.toLowerCase().includes(query))
-      : combo.items;
-    return pool.slice(0, COMBO_VISIBLE);
-  };
+  // Las sugerencias ya vienen filtradas por GitLab.
+  combo.matches = () => combo.items.slice(0, COMBO_VISIBLE);
 
   combo.render = () => {
     combo.list.innerHTML = '';
@@ -864,47 +866,123 @@ function createGitlabCombo(input, list, onChange) {
     if (combo.onChange) combo.onChange(item);
   };
 
-  // Confirma el texto escrito solo si coincide exactamente con un elemento.
-  combo.commitTyped = () => {
-    const text = combo.input.value.trim().toLowerCase();
-    if (!text) {
-      if (combo.selected) {
-        combo.apply(null);
-        combo.render();
-      }
-      return null;
-    }
-    const match = combo.items.find((item) => item.label.toLowerCase() === text);
-    if (!match || (combo.selected && combo.selected.value === match.value)) return combo.selected;
-    combo.apply(match);
-    combo.render();
-    if (combo.onChange) combo.onChange(match);
-    return match;
-  };
-
-  combo.setItems = (items) => {
+  // Lista fijada por el codigo (primera pagina o reset): manda sobre el campo.
+  combo.applyItems = (items) => {
     combo.items = Array.isArray(items) ? items : [];
     combo.apply(null);
     combo.setOpen(false);
     combo.input.disabled = combo.items.length === 0;
   };
 
-  combo.reset = () => {
+  // Respuesta de una busqueda: respeta lo escrito y la eleccion si sigue viable.
+  combo.applySearchItems = (items, truncated) => {
+    combo.items = Array.isArray(items) ? items : [];
+    if (combo.items.length) combo.input.disabled = false;
+    if (truncated) {
+      setGitlabMessage(
+        `Se muestran solo los primeros ${COMBO_PAGE_SIZE} resultados; escribe un texto mas concreto.`,
+        'error'
+      );
+    }
+    if (combo.selected && !combo.items.some((item) => item.value === combo.selected.value)) {
+      combo.selected = null;
+    }
+    combo.shown = [];
+    combo.active = -1;
+    if (combo.open) combo.render();
+  };
+
+  // Deja el campo como nuevo: sin texto, sin eleccion y sin respuestas en vuelo.
+  combo.applyQuery = () => {
+    combo.seq += 1;
+    if (combo.timer) {
+      clearTimeout(combo.timer);
+      combo.timer = null;
+    }
     combo.items = [];
     combo.apply(null);
     combo.setOpen(false);
     combo.input.disabled = true;
   };
 
+  combo.reset = combo.applyQuery;
+
+  // Busca en GitLab. `immediate` salta el retardo (carga inicial y al copiar).
+  combo.request = (query, immediate) => {
+    const seq = ++combo.seq;
+    const session = state.gitlabSession;
+    if (combo.timer) {
+      clearTimeout(combo.timer);
+      combo.timer = null;
+    }
+    const run = async () => {
+      combo.timer = null;
+      let result;
+      try {
+        result = await combo.fetchItems(String(query || ''));
+      } catch (err) {
+        result = { ok: false, error: err.message };
+      }
+      if (seq !== combo.seq || session !== state.gitlabSession) return;
+      if (!els.includeMrCheckbox.checked) return;
+      if (!result.ok) {
+        combo.applySearchItems([], false);
+        setGitlabMessage(`Error al consultar ${combo.label}: ${result.error}`, 'error');
+        return;
+      }
+      combo.applySearchItems(result.items, result.truncated);
+    };
+    if (immediate) return run();
+    return new Promise((resolve) => {
+      combo.timer = setTimeout(() => {
+        run().then(resolve, resolve);
+      }, COMBO_SEARCH_DEBOUNCE_MS);
+    });
+  };
+
+  // Solo texto escrito: vale si es el nombre exacto de una sugerencia. Si la
+  // lista esta cerrada se pide a GitLab antes de decidir.
+  combo.commitTyped = async () => {
+    const text = combo.input.value.trim();
+    if (!text) {
+      combo.apply(null);
+      combo.render();
+      return null;
+    }
+    const exact = (items) =>
+      (items || []).find((item) => item.label.toLowerCase() === text.toLowerCase()) || null;
+
+    let match = exact(combo.items);
+    if (!match && !combo.open) {
+      await combo.request(text, true);
+      match = exact(combo.items);
+    }
+    if (match) {
+      if (!combo.selected || combo.selected.value !== match.value) {
+        combo.selected = match;
+        combo.input.value = match.label;
+        combo.render();
+        if (combo.onChange) combo.onChange(match);
+      }
+      return match;
+    }
+    if (combo.selected) {
+      combo.selected = null;
+      combo.render();
+    }
+    return null;
+  };
+
   combo.input.addEventListener('input', () => {
     combo.selected = null;
     combo.active = -1;
     combo.setOpen(true);
+    combo.request(combo.input.value.trim(), false);
   });
   combo.input.addEventListener('focus', () => combo.setOpen(true));
   combo.input.addEventListener('blur', () => {
-    combo.commitTyped();
     combo.setOpen(false);
+    combo.commitTyped();
   });
   combo.input.addEventListener('keydown', (event) => {
     const key = event && event.key;
@@ -929,8 +1007,8 @@ function createGitlabCombo(input, list, onChange) {
         combo.choose(onlyMatch);
         return;
       }
-      combo.commitTyped();
       combo.setOpen(false);
+      combo.commitTyped();
       return;
     }
     if (key === 'Escape') {
@@ -947,80 +1025,91 @@ function createGitlabCombo(input, list, onChange) {
 const gitlabProjectCombo = createGitlabCombo(
   els.gitlabProjectInput,
   els.gitlabProjectList,
-  (project) => loadGitlabBranches(project.value)
+  {
+    label: 'los proyectos',
+    fetchItems: fetchGitlabProjectItems,
+    onChange: (project) => loadGitlabBranches(project.value),
+  }
 );
 const gitlabSourceCombo = createGitlabCombo(
   els.gitlabSourceBranchInput,
-  els.gitlabSourceBranchList
+  els.gitlabSourceBranchList,
+  { label: 'las ramas', fetchItems: (term) => fetchGitlabBranchItems(term) }
 );
 const gitlabTargetCombo = createGitlabCombo(
   els.gitlabTargetBranchInput,
-  els.gitlabTargetBranchList
+  els.gitlabTargetBranchList,
+  { label: 'las ramas', fetchItems: (term) => fetchGitlabBranchItems(term) }
 );
 const gitlabCombos = [gitlabProjectCombo, gitlabSourceCombo, gitlabTargetCombo];
-
-function comboValue(combo) {
-  return combo && combo.selected ? combo.selected.value : '';
-}
 
 function projectLabel(project) {
   return project.pathWithNamespace || project.name || String(project.id);
 }
 
+function branchItems(branches) {
+  return (branches || []).map((branch) => ({ value: branch.name, label: branch.name }));
+}
+
+async function fetchGitlabProjectItems(term) {
+  const result = await window.api.getGitlabProjects(state.config, term);
+  if (!result || !result.ok) {
+    return { ok: false, error: (result && result.error) || 'respuesta no valida' };
+  }
+  return {
+    ok: true,
+    truncated: !!result.truncated,
+    items: (result.projects || []).map((project) => ({
+      value: String(project.id),
+      label: projectLabel(project),
+    })),
+  };
+}
+
+// Las ramas pertenecen al proyecto elegido; sin proyecto no hay busqueda.
+async function fetchGitlabBranchItems(term) {
+  const project = gitlabProjectCombo.selected;
+  if (!project) return { ok: true, items: [], truncated: false };
+  const result = await window.api.getGitlabBranches(state.config, project.value, term);
+  if (!result || !result.ok) {
+    return { ok: false, error: (result && result.error) || 'respuesta no valida' };
+  }
+  return { ok: true, truncated: !!result.truncated, items: branchItems(result.branches) };
+}
+
+function noteTruncated(truncated) {
+  if (!truncated) return false;
+  setGitlabMessage(
+    `Se muestran solo los primeros ${COMBO_PAGE_SIZE} resultados; escribe un texto mas concreto.`,
+    'error'
+  );
+  return true;
+}
+
 function setGitlabSelectionVisible(visible) {
+  state.gitlabSession += 1;
+  state.gitlabProjects = [];
   els.gitlabSelection.classList.toggle('hidden', !visible);
   setGitlabMessage('', '');
-  if (visible) {
-    gitlabProjectCombo.reset();
-    gitlabSourceCombo.reset();
-    gitlabTargetCombo.reset();
-    return;
-  }
-  state.gitlabRequestId += 1;
-  state.gitlabProjects = [];
   gitlabProjectCombo.reset();
   gitlabSourceCombo.reset();
   gitlabTargetCombo.reset();
 }
 
-async function loadGitlabProjects() {
-  const requestId = ++state.gitlabRequestId;
-  state.gitlabProjects = [];
-  gitlabProjectCombo.setItems([]);
-  gitlabSourceCombo.reset();
-  gitlabTargetCombo.reset();
+// Primera pagina de proyectos: al abrir el panel y al volver de la configuracion.
+function loadGitlabProjects() {
   setGitlabMessage('Consultando proyectos de GitLab...', '');
-
-  let result;
-  try {
-    result = await window.api.getGitlabProjects(state.config);
-  } catch (err) {
-    if (requestId === state.gitlabRequestId && els.includeMrCheckbox.checked) {
-      setGitlabMessage('Error al consultar GitLab: ' + err.message, 'error');
-    }
-    return;
-  }
-  if (requestId !== state.gitlabRequestId || !els.includeMrCheckbox.checked) return;
-  if (!result.ok) {
-    setGitlabMessage('Error al consultar GitLab: ' + result.error, 'error');
-    return;
-  }
-  state.gitlabProjects = result.projects || [];
-  gitlabProjectCombo.setItems(
-    state.gitlabProjects.map((project) => ({ value: String(project.id), label: projectLabel(project) }))
-  );
-  setGitlabMessage(
-    state.gitlabProjects.length
-      ? `${state.gitlabProjects.length} proyecto(s). Escribe para filtrar y elige uno de la lista.`
-      : 'No se encontraron proyectos accesibles con este token.',
-    state.gitlabProjects.length ? 'ok' : 'error'
-  );
+  return gitlabProjectCombo.request('', true);
 }
 
+// Al elegir proyecto se recargan las dos ramas desde cero, con una sola
+// peticion inicial y sin arrastrar la eleccion anterior.
 async function loadGitlabBranches(projectId) {
-  const requestId = ++state.gitlabRequestId;
   gitlabSourceCombo.reset();
   gitlabTargetCombo.reset();
+  const session = state.gitlabSession;
+  const sourceSeq = gitlabSourceCombo.seq;
+  const targetSeq = gitlabTargetCombo.seq;
   if (!projectId) {
     setGitlabMessage('', '');
     return;
@@ -1029,27 +1118,27 @@ async function loadGitlabBranches(projectId) {
   setGitlabMessage('Consultando ramas de GitLab...', '');
   let result;
   try {
-    result = await window.api.getGitlabBranches(state.config, projectId);
+    result = await fetchGitlabBranchItems('');
   } catch (err) {
-    if (requestId === state.gitlabRequestId && els.includeMrCheckbox.checked) {
-      setGitlabMessage('Error al consultar las ramas: ' + err.message, 'error');
+    result = { ok: false, error: err.message };
+  }
+  if (session !== state.gitlabSession || !els.includeMrCheckbox.checked) return;
+
+  if (!result.ok) {
+    if (sourceSeq === gitlabSourceCombo.seq) {
+      setGitlabMessage(`Error al consultar las ramas: ${result.error}`, 'error');
     }
     return;
   }
-  if (requestId !== state.gitlabRequestId || !els.includeMrCheckbox.checked) return;
-  if (!result.ok) {
-    setGitlabMessage('Error al consultar las ramas: ' + result.error, 'error');
-    return;
-  }
-  const branches = result.branches || [];
-  const items = branches.map((branch) => ({ value: branch.name, label: branch.name }));
-  gitlabSourceCombo.setItems(items);
-  gitlabTargetCombo.setItems(items);
+  if (sourceSeq === gitlabSourceCombo.seq) gitlabSourceCombo.applyItems(result.items);
+  if (targetSeq === gitlabTargetCombo.seq) gitlabTargetCombo.applyItems(result.items);
+  if (sourceSeq !== gitlabSourceCombo.seq && targetSeq !== gitlabTargetCombo.seq) return;
+  if (noteTruncated(result.truncated)) return;
   setGitlabMessage(
-    branches.length
-      ? `${branches.length} rama(s). Escribe para filtrar y elige origen y destino.`
+    result.items.length
+      ? `${result.items.length} rama(s). Escribe para buscar y elige origen y destino.`
       : 'No se encontraron ramas.',
-    branches.length ? 'ok' : 'error'
+    result.items.length ? 'ok' : 'error'
   );
 }
 
@@ -1190,8 +1279,8 @@ els.copyDoBtn.addEventListener('click', async () => {
   const includeMr = els.includeMrCheckbox.checked;
   const gitlab = { projectId: '', projectName: '', sourceBranch: '', targetBranch: '' };
   if (includeMr) {
-    // Un texto escrito solo vale si coincide exacto con un elemento de la lista.
-    gitlabCombos.forEach((combo) => combo.commitTyped());
+    // Un texto escrito solo vale si GitLab lo devuelve como nombre exacto.
+    await Promise.all(gitlabCombos.map((combo) => combo.commitTyped()));
     const project = gitlabProjectCombo.selected;
     const source = gitlabSourceCombo.selected;
     const target = gitlabTargetCombo.selected;

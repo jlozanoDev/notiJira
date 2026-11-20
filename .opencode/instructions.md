@@ -30,8 +30,8 @@ The renderer never touches `fs`, `fetch`, or Node APIs. `main.js` owns all I/O.
 | `config:save` | `saveConfig(cfg)` | normalizes, writes `config.json`, reconfigures the updater | `{ ok: true }` or `{ ok: false, error }` |
 | `jira:test` | `testConnection(cfg)` | `getMyself` | `{ ok, displayName, accountId }` or `{ ok: false, error }` |
 | `jira:notifications` | `getNotifications(cfg)` | `fetchNotifications` | `{ ok, notifications }` or `{ ok: false, error }` |
-| `gitlab:projects` | `getGitlabProjects(cfg)` | lists projects visible to the configured token | `{ ok, projects }` or `{ ok: false, error }` |
-| `gitlab:branches` | `getGitlabBranches(cfg, projectId)` | lists branches for the selected project | `{ ok, branches }` or `{ ok: false, error }` |
+| `gitlab:projects` | `getGitlabProjects(cfg, search)` | one `GET /projects` page filtered by `search` | `{ ok, projects, truncated }` or `{ ok: false, error }` |
+| `gitlab:branches` | `getGitlabBranches(cfg, projectId, search)` | one `GET /projects/:id/repository/branches` page filtered by `search` | `{ ok, branches, truncated }` or `{ ok: false, error }` |
 | `shell:openExternal` | `openExternal(url)` | validates `^https?://`, then `shell.openExternal` | `boolean` |
 | `notify` | `notify(payload)` | native `Notification` | `boolean` |
 
@@ -62,8 +62,9 @@ Mention scan: JQL `comment ~ currentUser() AND updated >= -90d`, retried with `c
 ## GitLab access
 
 - Configure the GitLab instance root URL and an access token with `api` permission. Require HTTPS; HTTP is allowed only for loopback test servers.
-- `main.js` sends the token in the `PRIVATE-TOKEN` header to that configured host and uses `/api/v4/projects`, `/projects/:id/repository/branches`, and `/projects/:id/repository/compare`. Requests reject redirects to avoid forwarding the token.
-- Project and branch lists are paginated in pages of 100. The comparison uses the target branch as `from` and source branch as `to`; its diff is appended after the Jira Markdown.
+- `main.js` sends the token in the `PRIVATE-TOKEN` header to that configured host and uses `/projects`, `/projects/:id/repository/branches`, and `/projects/:id/repository/compare`. Requests reject redirects to avoid forwarding the token.
+- Project and branch lists are searched **server-side** with the `search` parameter, one page of 100 (`per_page=100&page=1`) per query. `truncated: true` means GitLab filled the page, so the UI asks for a more specific term. The renderer debounces queries at 250 ms and keeps one sequence number per field, so a slow response never overwrites a newer list of the same field.
+- The comparison uses the target branch as `from` and source branch as `to`; its diff is appended after the Jira Markdown.
 - GitLab credentials share `config.json` in `app.getPath('userData')` and are stored in plain text like Jira credentials. Never log either token or include it in copied Markdown.
 
 ## Notification shape
