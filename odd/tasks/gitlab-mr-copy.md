@@ -1,7 +1,7 @@
 # GitLab merge-request diff in Jira copy
-- Objective: add GitLab project/branch selection and append the merge-request diff to the existing Jira Markdown copy, then publish NotiJira 1.1.0.
-- Branch: `feature/gitlab-mr-copy`. Delivery strategy: `ask-on-risk`; forecast exceeds approximately 400 authored lines, so choose a chain strategy before the first commit.
-- Test runner: no general suite; use `npm run check:copy`, `npm run check:adf`, `node --check` on touched JavaScript, GitLab API mocks, and the authorized package/release checks.
+- Objective: retain GitLab server-side search, default source search to the Jira issue key and target to `develop`, and prepare NotiJira 1.1.3.
+- Branch: `feature/gitlab-default-branches` from `main` at `894f562`. Delivery strategy: `ask-on-risk`; forecast below approximately 400 authored changed lines.
+- Test runner: no general suite; use `npm run check:copy` (33), `npm run check:renderer` (27), `npm run check:adf` (13), `node --check` on touched JavaScript, mocked Jira/GitLab REST, and the package build.
 
 ## Specs
 
@@ -68,11 +68,24 @@
   - `GET /api/v4/projects/:id/repository/branches?search=<texto>`
 - Texto vacío (al abrir) carga la primera página; cada pulsación vuelve a buscar con debounce (250 ms) y solo la primera página de 100. Ya no se recorren todas las páginas, así que desaparece el tope de "demasiados resultados".
 - Cada campo mantiene su propia lista y su propia guarda de respuestas atrasadas: escribir en origen no cambia las sugerencias de destino.
-- Al elegir un proyecto se cargan las ramas por defecto (búsqueda vacía) en ambos campos.
+- In v1.1.2, choosing a project loaded the first branch page with an empty search; S8 in v1.1.3 replaces that initial query with the issue key for source and `develop` for target.
 - La interfaz avisa cuando GitLab devuelve una página completa (hay más resultados): "Se muestran los primeros 100; escribe un texto más concreto."
 - Se conserva lo ya comprometido en S6: elegir con clic o flechas + `Enter`, `Escape` conserva la elección, y un texto solo vale si coincide exacto con una sugerencia.
 - Comprobación: los sondajes del proceso principal afirman que la petición lleva `search=` y que solo se pide la página 1 (y `truncated` con 100); los del renderer afirman debounce (no hay petición antes del retardo), lista servida por el servidor, independencia entre origen y destino y que una respuesta atrasada no pisa la más reciente.
 - Riesgo: item 3 (el payload de los canales IPC `gitlab:projects` y `gitlab:branches` cambia) y item 4 (peticiones por tecla con orden asíncrono).
+
+### S8 — Búsqueda por defecto de ramas al elegir proyecto
+
+> "Otro cambio, al marcar el check y poner el proyecto de gitlab, la rama de origen buscará por defecto el nombre de la tarea y en destino por defecto será develop. Crear version 1.1.3"
+>
+> "Clave Jira"
+
+- Al marcar Obtener MR y elegir un proyecto, el buscador de origen se rellena con la clave Jira de la tarea (`state.copyData.issue.key`) y consulta GitLab con `search=<issueKey>`.
+- El buscador de destino se rellena con `develop` y consulta GitLab con `search=develop`.
+- Assumption: si GitLab devuelve una coincidencia exacta con la clave o con `develop`, se selecciona automáticamente; si no, se mantiene el texto de búsqueda y el usuario escoge de las sugerencias.
+- Cada cambio de proyecto limpia las ramas anteriores y repite ambas búsquedas por defecto para el nuevo proyecto.
+- Check: con `issueKey = AAA-1`, afirmar los `search` de ambas peticiones, el texto inicial, la selección exacta de `develop`, las sugerencias de origen, la selección exacta de la clave si existe esa rama, el payload final de `copy:issue` y que una escritura durante las búsquedas por defecto no deja un estado "Buscando..." colgado.
+- Risk: item 4 (búsquedas asíncronas de origen/destino y orden frente a escritura o cambio de proyecto).
 
 ## Tasks
 
@@ -85,14 +98,23 @@
 | T5 | S6, S4 | inline | done | 562cc30 |
 | T6 | S3, S6 | inline | done — release v1.1.1 publicada | d15111f |
 | T7 | S7, S4 | inline | done | ver L27 |
-| T8 | S3, S7 | inline | in progress | pending |
+| T8 | S3, S7 | inline | done — release v1.1.2 publicada | fc70475 |
+| T9 | S8, S4 | inline | done (uncommitted; checks pass) | pending |
+| T10 | S3, S8 | inline | local version/README/build done; remote publication pending explicit authorization | pending |
+| T11 | S4, S8 | delegated verifier after implementation checks | done; no blockers reproduced | pending |
 
 - T1: GitLab credential setup/removal, authenticated project listing, and project choice.
 - T2: branch listing, source/target selection, comparison retrieval, and diff appended to the existing Markdown copy.
 - T3: version update, packaging, README release links, and authorized GitHub publication.
 - T4: independent verification of the completed credential-sensitive and asynchronous change; the parent performs the required assessment and spot check.
+- T9: default source search from the Jira issue key and default target search/selection for `develop`.
+- T10: version 1.1.3, README links, both Windows artifacts, and GitHub publication after explicit remote authorization.
+- T11: independent verification of the async default-branch behavior; parent names Risk item 4 on the actual diff.
 - T3 risk: item 5 (Windows packaging and release delivery affect the shipped application).
 - T6 risk: item 5 (rebuild de instaladores y publicación de v1.1.1). T5 riesgo: ninguno (presentación; contrato IPC y payload intactos).
+- T8 risk: item 5 (rebuild de instaladores y publicación de v1.1.2).
+- T9 risk: item 4 (defaults asíncronos por campo al seleccionar proyecto).
+- T10 risk: item 5 (rebuild de instaladores y publicación de v1.1.3).
 - Route evidence: implementation is one dependency-ordered feature and has no parallel writer reason; implementation stays inline. The independent verifier is required by Risk items 2 and 4.
 
 ## Log
@@ -131,3 +153,15 @@
 - L32 (error mío en la especificación de la comprobación, no del build): el worker reportó que en el `app.asar` faltaba `Error al consultar GitLab:` y aparecía `los proyectos`. Comprobado en el código: ese mensaje se compone en tiempo de ejecución (`Error al consultar ${combo.label}: …`), así que nunca sería un literal del bundle, y `los proyectos` solo aparece en la ayuda del HTML («consultar los proyectos y ramas»). Con las cadenas correctas (`label: 'GitLab'`, la plantilla, `combo.panelOpen`, `prerequisite: () => !!gitlabProjectCombo.selected`, `searchGitLabPage`, `COMBO_SEARCH_DEBOUNCE_MS`, `truncated`) y las ausencias (`fetchGitLabPages`, `gitlabProjectSelect`, `params.set('order_by'`, `state.gitlabProjects`) el paquete queda **correcto**. Lección: al pedir verificación de un bundle, citar literales que existan en el origen; un literal inventado produce falsos fallos.
 - L33 (publicación, con la sesión `gh` de `jlozanoDev` autorizada): rama `feature/gitlab-server-search` empujada, PR #4 creado y fusionado a `main` con merge commit `7716e64` (árbol `8e164fb…` idéntico al de `7f1ffb4`, comprobado antes de etiquetar), tag anotado `v1.1.2` → `7716e64` empujado, release `v1.1.2` publicada (2026-11-20T19:06:48Z) y marcada *Latest* con `NotiJira.Setup.1.1.2.exe` y `NotiJira.1.1.2.exe`; ambas URLs devuelven HTTP 200. Siguiendo lo pedido, `v1.1.1` quedó como **«NotiJira v1.1.1 (superada por v1.1.2)»** con la nota del lockfile (reescrita desde un UTF-8 limpio tras un primer intento que PowerShell convirtió en texto con BOM y concatenaciones literales).
 - L34 (cierre): `main` sincronizado a `7716e64` cambiando de rama solo con el árbol limpio (la lección de L23 aplicada). La edición que añadió L31-L34 se comió el prefijo de L30 y pegó colas ajenas al final; reconstruido en este commit. Pendiente del usuario: DoD interactiva con GitLab real y, si se quiere, publicar `latest.yml` + `.blockmap` para usar GitHub como feed del actualizador.
+- L35 (petición de v1.1.3, verbatim): "Otro cambio, al marcar el check y poner el proyecto de gitlab, la rama de origen buscará por defecto el nombre de la tarea y en destino por defecto será develop. Crear version 1.1.3"
+- L36 (aclaración, verbatim): "Clave Jira". La rama de origen busca por defecto la clave Jira de la tarea, no su resumen.
+- L37: Created `feature/gitlab-default-branches` from `main` at `894f562`; v1.1.3 GitHub push/tag/release still require explicit authorization for that remote operation/session.
+- L38 (T9, RED→GREEN): S8 probes over the v1.1.2 baseline `894f562` reproduced RED (`check:renderer` 21/25, including dependent S6 expectations); current GREEN is `check:renderer` 27/27, `check:copy` 33/33, `check:adf` 13/13. Source search uses `AAA-1`, suggests `feature/AAA-1-fix`, auto-selects an exact `AAA-1` when present, and target search selects exact `develop`; final `copy:issue` carries the chosen refs. Differential vs `894f562`: `config:save`/`getConfig` and `copy:issue` with and without MR have identical stdout/clipboard/result shape and request counts after normalizing the ephemeral localhost port.
+- L39 (resilience correction): `loadGitlabBranches` no longer paints one shared “Buscando...” status while its two default queries are in flight; if a user edits source before one default response arrives, the stale result is discarded and the other field remains independent. An S8 probe asserts no stuck shared status. The dropdown shows its live query/results.
+- L40: `package.json`, `package-lock.json` root and `packages[""]` were changed programmatically to 1.1.3. Verified after bump: all three version fields agree, zero dependency version/resolved mismatches, `npm ls --package-lock-only --depth=0` exits 0.
+- L41: Differential against v1.1.2 baseline `894f562` confirms stdout, stderr and exit code stay byte-identical for config save/read and copy flows with and without MR (localhost port normalized). `main.js` and `preload.js` are unchanged by S8; server-side search remains S7 behavior.
+- L42 (pending): interactive DoD against a real GitLab account, plus explicit authorization for any v1.1.3 GitHub push/PR/merge/tag/release. The user asked to create version 1.1.3 but has not yet granted this candidate's remote publication.
+- L43 (T11 independent verification): verdicts S1-S4 and S6-S8 met/preserved; no blockers reproduced. Advisories: indentation in `createGitlabCombo` (corrected), shared “Buscando...” message could stick when the default response was superseded (removed and pinned with a passing probe), and copy-flow tests contain additive S7 probes. Independent probes confirmed S8 RED on `894f562` and 11/11 candidate probes; all focused suites, syntax checks, lock graph, and differential passed. Scratch paths were under `%LOCALAPPDATA%\\Temp\\opencode\\notijira-verify-20261120-205355` and `notijira-verify-latest.txt`.
+- L44: After the stuck-status correction, `check:copy` 33/33, `check:renderer` 27/27, `check:adf` 13/13, touched-JS `node --check`, and `git diff --check` pass. The initial 1.1.3 build predates the final renderer correction and is superseded.
+- L45: Corrected local rebuild `npm run dist -- --publish never` completed; the shell did not expose a numeric exit code after moving the process to the background. Parent spot-check confirms NSIS 76,553,792 B, portable 76,338,246 B, `latest.yml` version/size/SHA-512 match the NSIS artifact, and the packaged ASAR includes both combo-search markers, `searchGitLabPage`, `COMBO_SEARCH_DEBOUNCE_MS`, and excludes `fetchGitLabPages`/`setSelectOptions`. No tracked files were changed by packaging.
+- L46 (close pending): all v1.1.3 remote publication remains blocked on explicit authorization for the destination, operation, and GitHub credential/session. Real-GitLab interactive DoD is also unverified.

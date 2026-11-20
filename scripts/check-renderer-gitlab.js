@@ -33,6 +33,8 @@ const PROJECTS = [
 ];
 const BRANCHES = [
   { name: 'main' },
+  { name: 'develop' },
+  { name: 'feature/AAA-1-fix' },
   { name: 'feature/mr-copy' },
   { name: 'Feature/GITLAB-DIFF' },
   { name: 'release/1.1.1' },
@@ -330,6 +332,7 @@ check('S7 origen y destino consultan de forma independiente', async () => {
   const calls = callNames(h, 'getGitlabBranches').slice(before);
   assert.deepStrictEqual(calls.map((call) => call.args[2]), ['feature', 'release']);
   assert.deepStrictEqual(h.el('gitlabSourceBranchList').optionTexts(), [
+    'feature/AAA-1-fix',
     'feature/mr-copy',
     'Feature/GITLAB-DIFF',
   ]);
@@ -338,18 +341,19 @@ check('S7 origen y destino consultan de forma independiente', async () => {
 
 check('S7 una respuesta atrasada no pisa la lista mas reciente del mismo campo', async () => {
   let releaseStale;
-  let calls = 0;
   const h = createHarness({
     apiResults: withProjects({
       getConfig: CONFIG_WITH_GITLAB,
       getGitlabBranches: (config, projectId, term) => {
-        calls += 1;
-        if (calls === 2) {
+        if (term === 'vieja') {
           return new Promise((resolve) => {
             releaseStale = () => resolve({ ok: true, branches: [{ name: 'vieja/rama' }] });
           });
         }
-        return Promise.resolve({ ok: true, branches: [{ name: 'nueva/rama' }] });
+        if (term === 'nueva') {
+          return Promise.resolve({ ok: true, branches: [{ name: 'nueva/rama' }] });
+        }
+        return Promise.resolve({ ok: true, branches: filterBranches(term) });
       },
     }),
   });
@@ -357,10 +361,10 @@ check('S7 una respuesta atrasada no pisa la lista mas reciente del mismo campo',
   await type(h, 'gitlabProjectInput', 'notijira');
   await pick(h, 'gitlabProjectInput', 0);
 
-  h.el('gitlabSourceBranchInput').value = 'vvieja';
+  h.el('gitlabSourceBranchInput').value = 'vieja';
   h.el('gitlabSourceBranchInput').dispatch('input');
   await settle(h); // sale la peticion y se queda colgada
-  h.el('gitlabSourceBranchInput').value = 'nnueva';
+  h.el('gitlabSourceBranchInput').value = 'nueva';
   h.el('gitlabSourceBranchInput').dispatch('input');
   await settle(h);
   assert.deepStrictEqual(h.el('gitlabSourceBranchList').optionTexts(), ['nueva/rama']);
@@ -469,16 +473,151 @@ check('S6 elegir una sugerencia fija el proyecto y carga sus ramas', async () =>
   assert.strictEqual(h.el('gitlabProjectList').classList.contains('hidden'), true);
   assert.strictEqual(h.el('gitlabProjectInput').getAttribute('aria-expanded'), 'false');
   const branchCalls = callNames(h, 'getGitlabBranches');
-  assert.strictEqual(branchCalls.length, 1, 'una sola carga de ramas al elegir proyecto');
+  assert.strictEqual(branchCalls.length, 2, 'busqueda predeterminada independiente para origen y destino');
   assert.strictEqual(branchCalls[0].args[1], '42');
-  assert.ok(!branchCalls[0].args[2], 'la carga inicial de ramas no filtra por texto');
+  assert.deepStrictEqual(
+    branchCalls.slice(0, 2).map((call) => call.args[2]),
+    ['AAA-1', 'develop']
+  );
   assert.strictEqual(h.el('gitlabSourceBranchInput').disabled, false);
   assert.strictEqual(h.el('gitlabTargetBranchInput').disabled, false);
+  assert.strictEqual(h.el('gitlabSourceBranchInput').value, 'AAA-1');
+  assert.strictEqual(h.el('gitlabTargetBranchInput').value, 'develop');
+  assert.deepStrictEqual(h.el('gitlabSourceBranchList').optionTexts(), ['feature/AAA-1-fix']);
+  assert.strictEqual(h.el('gitlabTargetBranchList').classList.contains('hidden'), true);
 
   const src = await type(h, 'gitlabSourceBranchInput', 'feature');
-  assert.deepStrictEqual(src.labels, ['feature/mr-copy', 'Feature/GITLAB-DIFF']);
+  assert.deepStrictEqual(src.labels, [
+    'feature/AAA-1-fix',
+    'feature/mr-copy',
+    'Feature/GITLAB-DIFF',
+  ]);
   const dst = await type(h, 'gitlabTargetBranchInput', 'release');
   assert.deepStrictEqual(dst.labels, ['release/1.1.1']);
+});
+
+check('S8 al elegir proyecto busca por defecto la clave Jira y target develop', async () => {
+  const h = createHarness({
+    apiResults: withProjects({
+      getConfig: CONFIG_WITH_GITLAB,
+      copyIssue: {
+        ok: true,
+        sections: 1,
+        comments: 0,
+        attachments: 0,
+        downloaded: 0,
+        failed: 0,
+        folder: '',
+      },
+    }),
+  });
+  await startCopyWithMr(h);
+
+  await type(h, 'gitlabProjectInput', 'notijira');
+  await pick(h, 'gitlabProjectInput', 0);
+
+  const branchCalls = callNames(h, 'getGitlabBranches');
+  assert.deepStrictEqual(
+    branchCalls.map((call) => call.args[2]),
+    ['AAA-1', 'develop'],
+    'origen busca la clave Jira y destino busca develop'
+  );
+  assert.strictEqual(h.el('gitlabSourceBranchInput').value, 'AAA-1');
+  assert.deepStrictEqual(h.el('gitlabSourceBranchList').optionTexts(), ['feature/AAA-1-fix']);
+  assert.strictEqual(h.el('gitlabTargetBranchInput').value, 'develop');
+
+  await pick(h, 'gitlabSourceBranchInput', 0);
+  assert.strictEqual(h.el('gitlabTargetBranchList').classList.contains('hidden'), true);
+  h.el('copyDoBtn').dispatch('click');
+  await settle(h);
+
+  const payload = lastCall(h, 'copyIssue').args[1];
+  assert.strictEqual(payload.gitlab.sourceBranch, 'feature/AAA-1-fix');
+  assert.strictEqual(payload.gitlab.targetBranch, 'develop');
+});
+
+check('S8 una busqueda manual durante los defaults no deja el estado cargando', async () => {
+  let finishSourceDefault;
+  let finishTargetDefault;
+  const h = createHarness({
+    apiResults: withProjects({
+      getConfig: CONFIG_WITH_GITLAB,
+      getGitlabBranches: (config, projectId, term) => {
+        if (term === 'AAA-1') {
+          return new Promise((resolve) => { finishSourceDefault = resolve; });
+        }
+        if (term === 'develop') {
+          return new Promise((resolve) => { finishTargetDefault = resolve; });
+        }
+        return Promise.resolve({
+          ok: true,
+          branches: [{ name: 'feature/AAA-1-fix' }],
+          truncated: false,
+        });
+      },
+    }),
+  });
+  await startCopyWithMr(h);
+  await type(h, 'gitlabProjectInput', 'notijira');
+  await pick(h, 'gitlabProjectInput', 0);
+  assert.strictEqual(
+    h.el('gitlabMessage').textContent.includes('Buscando'),
+    false,
+    'no se muestra un estado compartido que pueda quedarse colgado'
+  );
+
+  await type(h, 'gitlabSourceBranchInput', 'feature/');
+  finishSourceDefault({
+    ok: true,
+    branches: [{ name: 'feature/AAA-1-old' }],
+    truncated: false,
+  });
+  finishTargetDefault({ ok: true, branches: [{ name: 'develop' }], truncated: false });
+  await settle(h);
+
+  assert.deepStrictEqual(h.el('gitlabSourceBranchList').optionTexts(), ['feature/AAA-1-fix']);
+  assert.strictEqual(
+    h.el('gitlabMessage').textContent.includes('Buscando'),
+    false,
+    'una respuesta por defecto reemplazada no debe dejar el estado de carga colgado'
+  );
+});
+
+check('S8 si la rama de origen coincide exactamente con la clave Jira se selecciona', async () => {
+  const h = createHarness({
+    apiResults: withProjects({
+      getConfig: CONFIG_WITH_GITLAB,
+      getGitlabBranches: (config, projectId, term) =>
+        Promise.resolve({
+          ok: true,
+          branches: term === 'AAA-1' ? [{ name: 'AAA-1' }] : [{ name: 'develop' }],
+          truncated: false,
+        }),
+      copyIssue: {
+        ok: true,
+        sections: 1,
+        comments: 0,
+        attachments: 0,
+        downloaded: 0,
+        failed: 0,
+        folder: '',
+      },
+    }),
+  });
+  await startCopyWithMr(h);
+
+  await type(h, 'gitlabProjectInput', 'notijira');
+  await pick(h, 'gitlabProjectInput', 0);
+  assert.strictEqual(h.el('gitlabSourceBranchInput').value, 'AAA-1');
+  assert.strictEqual(h.el('gitlabTargetBranchInput').value, 'develop');
+  assert.strictEqual(h.el('gitlabSourceBranchList').classList.contains('hidden'), true);
+  assert.strictEqual(h.el('gitlabTargetBranchList').classList.contains('hidden'), true);
+
+  h.el('copyDoBtn').dispatch('click');
+  await settle(h);
+  const payload = lastCall(h, 'copyIssue').args[1];
+  assert.strictEqual(payload.gitlab.sourceBranch, 'AAA-1');
+  assert.strictEqual(payload.gitlab.targetBranch, 'develop');
 });
 
 check('S6 sin proyecto elegido no se consultan las ramas', async () => {
@@ -506,7 +645,9 @@ check('S6 el teclado baja por las sugerencias y confirma con Enter', async () =>
 
   await key(h, 'gitlabProjectInput', 'Enter');
   assert.strictEqual(h.el('gitlabProjectInput').value, 'equipo/chaty', 'Enter confirma la sugerencia activa');
-  assert.strictEqual(callNames(h, 'getGitlabBranches').length, 1, 'y carga sus ramas');
+  const branchCalls = callNames(h, 'getGitlabBranches');
+  assert.strictEqual(branchCalls.length, 2, 'y busca origen y destino por defecto');
+  assert.deepStrictEqual(branchCalls.map((call) => call.args[2]), ['AAA-1', 'develop']);
 
   await key(h, 'gitlabProjectInput', 'ArrowDown');
   await key(h, 'gitlabProjectInput', 'Escape');
@@ -614,12 +755,12 @@ check('S6 cambiar de proyecto descarta las ramas elegidas', async () => {
   await pick(h, 'gitlabProjectInput', 0);
 
   const branchCalls = callNames(h, 'getGitlabBranches');
-  const last = branchCalls[branchCalls.length - 1];
-  assert.strictEqual(last.args[1], '42', 'las ramas son del proyecto nuevo');
-  assert.ok(!last.args[2], 'la carga del proyecto nuevo no filtra por texto');
-  assert.ok(branchCalls.length > 2, 'cada campo y cada proyecto consultan por su lado');
-  assert.strictEqual(h.el('gitlabSourceBranchInput').value, '', 'la rama del proyecto anterior se descarta');
-  assert.strictEqual(h.el('gitlabTargetBranchInput').value, '');
+  const lastTwo = branchCalls.slice(-2);
+  assert.strictEqual(lastTwo[0].args[1], '42', 'las ramas son del proyecto nuevo');
+  assert.deepStrictEqual(lastTwo.map((call) => call.args[2]), ['AAA-1', 'develop']);
+  assert.strictEqual(h.el('gitlabSourceBranchInput').value, 'AAA-1', 'se reinicia con la clave de la tarea');
+  assert.strictEqual(h.el('gitlabTargetBranchInput').value, 'develop', 'se reinicia con el destino por defecto');
+  assert.ok(!h.el('gitlabSourceBranchInput').value.includes('main'));
 });
 
 (async () => {
