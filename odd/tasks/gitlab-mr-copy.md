@@ -67,14 +67,15 @@
 | T2 | S1, S4 | inline | done | 4f26c34 |
 | T3 | S3, S4 | inline | done — release v1.1.0 publicada | ad66f8e |
 | T4 | S1-S4 | delegated verifier after implementation checks | done | 4f26c34 + ad66f8e |
-| T5 | S6, S4 | inline | done | ver L19 |
-| T6 | S3, S6 | inline | in progress | pending |
+| T5 | S6, S4 | inline | done | 562cc30 |
+| T6 | S3, S6 | inline | done — release v1.1.1 publicada | d15111f |
 
 - T1: GitLab credential setup/removal, authenticated project listing, and project choice.
 - T2: branch listing, source/target selection, comparison retrieval, and diff appended to the existing Markdown copy.
 - T3: version update, packaging, README release links, and authorized GitHub publication.
 - T4: independent verification of the completed credential-sensitive and asynchronous change; the parent performs the required assessment and spot check.
 - T3 risk: item 5 (Windows packaging and release delivery affect the shipped application).
+- T6 risk: item 5 (rebuild de instaladores y publicación de v1.1.1). T5 riesgo: ninguno (presentación; contrato IPC y payload intactos).
 - Route evidence: implementation is one dependency-ordered feature and has no parallel writer reason; implementation stays inline. The independent verifier is required by Risk items 2 and 4.
 
 ## Log
@@ -100,3 +101,7 @@
 - L19 (petición de la 1.1.1, verbatim): "crea la version 1.1.1, modificando para que los selects de proyecto, rama origen y rama destino sea buscadores, en los que se escriba y te sugiera las que coincidan. Actualiza al final  el exe y el readme y añade el tag/release en github". Se añade S6 y las tareas T5/T6; la rama es `feature/gitlab-combo-search` desde `main` (`e61bf52`).
 - L20 (T5, inline): los tres `<select>` pasan a combobox en `renderer/renderer.js` (`createGitlabCombo`: filtro local por subcadena sin distinguir mayúsculas, máximo 12 sugerencias, clic con `mousedown`, flechas + `Enter`, `Escape` conserva la elección, `blur`/`Enter` confirman solo un nombre exacto, `aria-expanded`/`role=listbox`). Cambiar de proyecto limpia y recarga las ramas; desmarcar el check resetea los tres. `index.html` lleva `.combo` con input + `ul`; `styles.css` gana `.combo-list`/`.combo-option`/`.combo-empty` y pierde las reglas `.modal select` ya sin uso. No hay peticiones nuevas por tecla: se filtra la lista ya cargada.
 - L21 (pruebas T5, RED→GREEN): `scripts/check-renderer-gitlab.js` pasa de 8 a 16 aserciones y ahora abre la modal de copia por el camino público (buscar → clic en el resultado); el DOM simulado gana `className` sincronizado con `classList`, `setAttribute/getAttribute` y `searchIssues`. RED observado: 0/16 antes del combobox. GREEN: `check:renderer` 16/16, `check:copy` 26/26 (prueba estructural actualizada a los nuevos IDs), `check:adf` 13/13, `node --check` limpio en los 6 JS tocados y 49/49 IDs del renderer presentes en `index.html`. `main.js`, `preload.js` y `adf.js` quedan intactos, así que el contrato del proceso principal lo sigue fijando `check:copy` (incluida la regresión de notificaciones y la forma antigua de la respuesta de copia); las 8 aserciones previas de S2 (recuperación tras credenciales, config normalizada, borrado, respuestas atrasadas) se conservan sobre el nuevo DOM. Riesgo: ninguno (capa de presentación; payload `copy:issue` e IPC sin cambios).
+- L22 (T6, publicación de v1.1.1 con la sesión `gh` ya autorizada en este repo): rama `feature/gitlab-combo-search` empujada, PR #3 creado y fusionado a `main` con merge commit `c07d41e` (árbol `89e57f4…` idéntico al de `d15111f`, verificado con `git rev-parse <rev>^{tree}` antes de etiquetar). Tag anotado `v1.1.1` → `c07d41e`, empujado. Release `v1.1.1` publicada (2026-11-20T15:42:37Z) con `NotiJira.Setup.1.1.1.exe` (76.552.098 B) y `NotiJira.1.1.1.exe` (76.336.611 B); `FileVersion`/`ProductVersion` = 1.1.1 en ambos y las dos URLs de descarga devuelven HTTP 200.
+- L23 (artefactos): compilación delegada (`npm run dist -- --publish never`, worker fresco, sin operaciones remotas) sobre el worktree limpio en `d15111f`; `latest.yml` → `version: 1.1.1` con el sha512/tamaño que coinciden con el instalador subido. Prueba de contenido del paquete: `app.asar` contiene `createGitlabCombo`, `gitlabProjectInput` y `combo-list`, y ya NO contiene `gitlabProjectSelect`, así que los binarios publicados llevan los buscadores. Lección aplicada del intento anterior: no se mutó `package.json` mientras corría la compilación.
+- L24 (revisión nativa RDD): `gentle-ai review assess --base-ref e61bf52 --committed-only` → `risk=medium`, `review_due=false`, `review_due_reason=under_budget` (11 rutas, 895 líneas). No se abrió transacción de review para este slice; queda pendiente de presupuesto. El defecto aguas arriba (#6153, `operation_timeout` en STATUS ligado en repos con `node_modules`) sigue sin toparse: no se relanzó ni se abandonó el linaje anterior `review-a449c799828a91cc`.
+- L25 (pendiente del usuario): DoD interactiva con GitLab real — `npm start` → Configuracion → GitLab → buscar tarea → marcar Obtener MR → escribir en los tres buscadores y pegar la copia en OpenCode para revisar el diff.
