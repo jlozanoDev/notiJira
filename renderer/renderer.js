@@ -75,7 +75,6 @@ const state = {
   copyData: null,
   selectedSections: new Set(),
   selectedComments: new Set(),
-  gitlabProjects: [],
   returnToCopyModal: false,
   gitlabSession: 0,
 };
@@ -796,6 +795,7 @@ function createGitlabCombo(input, list, options) {
     label: options.label,
     fetchItems: options.fetchItems,
     onChange: options.onChange || null,
+    prerequisite: options.prerequisite || null,
     items: [],
     shown: [],
     selected: null,
@@ -866,18 +866,32 @@ function createGitlabCombo(input, list, options) {
     if (combo.onChange) combo.onChange(item);
   };
 
+  // El campo se puede editar mientras el panel esté abierto y tenga algo que
+  // buscar: sin proyecto no hay ramas que listar, pero un fallo de red no debe
+  // bloquear el reintento.
+  combo.panelOpen = () =>
+    els.includeMrCheckbox.checked && !els.gitlabSelection.classList.contains('hidden');
+  combo.ready = () => (combo.prerequisite ? !!combo.prerequisite() : true);
+  combo.refreshDisabled = () => {
+    if (!combo.panelOpen()) {
+      combo.input.disabled = true;
+      return;
+    }
+    combo.input.disabled = !(combo.items.length > 0 || combo.ready());
+  };
+
   // Lista fijada por el codigo (primera pagina o reset): manda sobre el campo.
   combo.applyItems = (items) => {
     combo.items = Array.isArray(items) ? items : [];
     combo.apply(null);
     combo.setOpen(false);
-    combo.input.disabled = combo.items.length === 0;
+    combo.refreshDisabled();
   };
 
   // Respuesta de una busqueda: respeta lo escrito y la eleccion si sigue viable.
   combo.applySearchItems = (items, truncated) => {
     combo.items = Array.isArray(items) ? items : [];
-    if (combo.items.length) combo.input.disabled = false;
+    combo.refreshDisabled();
     if (truncated) {
       setGitlabMessage(
         `Se muestran solo los primeros ${COMBO_PAGE_SIZE} resultados; escribe un texto mas concreto.`,
@@ -902,7 +916,7 @@ function createGitlabCombo(input, list, options) {
     combo.items = [];
     combo.apply(null);
     combo.setOpen(false);
-    combo.input.disabled = true;
+    combo.refreshDisabled();
   };
 
   combo.reset = combo.applyQuery;
@@ -1026,7 +1040,8 @@ const gitlabProjectCombo = createGitlabCombo(
   els.gitlabProjectInput,
   els.gitlabProjectList,
   {
-    label: 'los proyectos',
+    // El texto del error de proyectos se mantiene igual que antes de la busqueda.
+    label: 'GitLab',
     fetchItems: fetchGitlabProjectItems,
     onChange: (project) => loadGitlabBranches(project.value),
   }
@@ -1034,12 +1049,20 @@ const gitlabProjectCombo = createGitlabCombo(
 const gitlabSourceCombo = createGitlabCombo(
   els.gitlabSourceBranchInput,
   els.gitlabSourceBranchList,
-  { label: 'las ramas', fetchItems: (term) => fetchGitlabBranchItems(term) }
+  {
+    label: 'las ramas',
+    fetchItems: (term) => fetchGitlabBranchItems(term),
+    prerequisite: () => !!gitlabProjectCombo.selected,
+  }
 );
 const gitlabTargetCombo = createGitlabCombo(
   els.gitlabTargetBranchInput,
   els.gitlabTargetBranchList,
-  { label: 'las ramas', fetchItems: (term) => fetchGitlabBranchItems(term) }
+  {
+    label: 'las ramas',
+    fetchItems: (term) => fetchGitlabBranchItems(term),
+    prerequisite: () => !!gitlabProjectCombo.selected,
+  }
 );
 const gitlabCombos = [gitlabProjectCombo, gitlabSourceCombo, gitlabTargetCombo];
 
@@ -1088,7 +1111,6 @@ function noteTruncated(truncated) {
 
 function setGitlabSelectionVisible(visible) {
   state.gitlabSession += 1;
-  state.gitlabProjects = [];
   els.gitlabSelection.classList.toggle('hidden', !visible);
   setGitlabMessage('', '');
   gitlabProjectCombo.reset();

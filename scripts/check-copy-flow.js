@@ -524,6 +524,21 @@ check('S7 la busqueda sigue enviando el token solo a GitLab', async (h, config) 
   assert.ok(!calls[0].url.includes('gitlab-test-token'), 'el token nunca va en la URL');
 });
 
+check('S7 no se envian parametros que la spec no pide', async (h, config) => {
+  requests = [];
+  const gitlabConfig = { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' };
+  await h['gitlab:projects']({}, { config: gitlabConfig, search: 'noti' });
+  await h['gitlab:branches']({}, { config: gitlabConfig, projectId: 41, search: 'feature' });
+  const calls = requests.filter((request) => request.url.startsWith('/api/v4/'));
+  assert.strictEqual(calls.length, 2);
+  for (const call of calls) {
+    const params = new URL(call.url, 'http://localhost').searchParams;
+    assert.ok(!params.has('order_by'), 'order_by no pedido: ' + call.url);
+    assert.ok(!params.has('sort'), 'sort no pedido: ' + call.url);
+    assert.ok(!params.has('regex'), 'regex no pedido: ' + call.url);
+  }
+});
+
 check('S1/S2 GitLab controls are wired through the preload and prompt for missing credentials', async () => {
   const html = fs.readFileSync(path.join(REPO, 'renderer', 'index.html'), 'utf8');
   const renderer = fs.readFileSync(path.join(REPO, 'renderer', 'renderer.js'), 'utf8');

@@ -420,17 +420,42 @@ check('S7 avisa cuando GitLab devuelve la pagina completa', async () => {
   assert.match(h.el('gitlabMessage').textContent, /concreto/);
 });
 
-check('S7 un error de GitLab se muestra y deja el buscador vacio', async () => {
+check('S7 un error de GitLab se muestra con el texto de siempre y deja reintentar', async () => {
+  let failing = true;
   const h = createHarness({
     apiResults: withProjects({
       getConfig: CONFIG_WITH_GITLAB,
-      getGitlabProjects: () => Promise.resolve({ ok: false, error: 'GitLab respondio 401' }),
+      getGitlabProjects: (config, term) => {
+        if (failing) return Promise.resolve({ ok: false, error: 'GitLab respondio 401' });
+        return Promise.resolve({ ok: true, projects: filterProjects(term) });
+      },
     }),
   });
   await startCopyWithMr(h);
 
-  assert.match(h.el('gitlabMessage').textContent, /GitLab respondio 401/);
-  assert.strictEqual(h.el('gitlabProjectInput').disabled, true, 'sin resultados el campo queda cerrado');
+  assert.strictEqual(
+    h.el('gitlabMessage').textContent,
+    'Error al consultar GitLab: GitLab respondio 401',
+    'el texto del error de proyectos no cambia respecto a la version anterior'
+  );
+  assert.strictEqual(h.el('gitlabProjectInput').disabled, false, 'el buscador sigue usable tras el fallo');
+
+  failing = false;
+  const typed = await type(h, 'gitlabProjectInput', 'notijira');
+  assert.deepStrictEqual(typed.labels, ['equipo/notijira'], 'se puede reintentar sin remarcar el check');
+});
+
+check('S7 las ramas se pueden editar en cuanto hay proyecto elegido', async () => {
+  const h = createHarness({ apiResults: withProjects({ getConfig: CONFIG_WITH_GITLAB }) });
+  await startCopyWithMr(h);
+
+  assert.strictEqual(h.el('gitlabSourceBranchInput').disabled, true, 'sin proyecto no hay ramas que buscar');
+  assert.strictEqual(h.el('gitlabTargetBranchInput').disabled, true);
+
+  await type(h, 'gitlabProjectInput', 'notijira');
+  await pick(h, 'gitlabProjectInput', 0);
+  assert.strictEqual(h.el('gitlabSourceBranchInput').disabled, false);
+  assert.strictEqual(h.el('gitlabTargetBranchInput').disabled, false);
 });
 
 check('S6 elegir una sugerencia fija el proyecto y carga sus ramas', async () => {

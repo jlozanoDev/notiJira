@@ -95,17 +95,13 @@ async function gitlabRequest(config, endpoint) {
 // se avisa cuando viene llena para que el usuario concrete el texto.
 const GITLAB_PAGE_SIZE = 100;
 
-async function searchGitLabPage(config, endpoint, search, options = {}) {
+async function searchGitLabPage(config, endpoint, search) {
   const params = new URLSearchParams({
     per_page: String(GITLAB_PAGE_SIZE),
     page: '1',
   });
   const term = String(search || '').trim();
   if (term) params.set('search', term);
-  if (options.orderBy) {
-    params.set('order_by', options.orderBy);
-    params.set('sort', options.sort || 'asc');
-  }
 
   const batch = await gitlabRequest(config, `${endpoint}?${params.toString()}`);
   if (!Array.isArray(batch)) throw new Error('GitLab devolvio una respuesta no valida');
@@ -113,9 +109,7 @@ async function searchGitLabPage(config, endpoint, search, options = {}) {
 }
 
 async function getGitLabProjects(config, search) {
-  const { items, truncated } = await searchGitLabPage(config, '/projects', search, {
-    orderBy: 'name',
-  });
+  const { items, truncated } = await searchGitLabPage(config, '/projects', search);
   return {
     truncated,
     projects: items.map((project) => ({
