@@ -4,7 +4,7 @@ Aplicación de escritorio para Windows que vigila Jira y te avisa cuando te menc
 
 ## Descargar
 
-[Descargar NotiJira v1.1.0 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.1.0). En **Assets**, elige `NotiJira.Setup.1.1.0.exe` para instalar o `NotiJira.1.1.0.exe` para usar la versión portable.
+[Descargar NotiJira v1.1.1 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.1.1). En **Assets**, elige `NotiJira.Setup.1.1.1.exe` para instalar o `NotiJira.1.1.1.exe` para usar la versión portable.
 
 ## Ruta rápida
 
@@ -69,7 +69,7 @@ El diff de la comparación se añade al final del Markdown copiado. Las credenci
 
 `npm run dist` genera en `dist/` el instalador `NotiJira Setup <versión>.exe` (NSIS, asistido y por usuario) y la versión portable `NotiJira <versión>.exe`. Antes de compilarlo, actualiza `version` en `package.json` y `package-lock.json`.
 
-Al subir esos archivos a una release de GitHub, la plataforma reemplaza los espacios del nombre por puntos: `NotiJira Setup 1.1.0.exe` pasa a ser `NotiJira.Setup.1.1.0.exe`. Enlázalos ya con ese nombre.
+Al subir esos archivos a una release de GitHub, la plataforma reemplaza los espacios del nombre por puntos: `NotiJira Setup <versión>.exe` pasa a ser `NotiJira.Setup.<versión>.exe`. Enlázalos ya con ese nombre.
 
 En Windows hay **un requisito del sistema**: al preparar sus herramientas, electron-builder extrae un archivador que contiene enlaces simbólicos. Si tu usuario no tiene privilegio para crearlos, el build falla siempre con:
 
