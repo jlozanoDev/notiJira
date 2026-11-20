@@ -1,6 +1,7 @@
 'use strict';
 // Headless regression checks for the GitLab part of the copy modal.
-// Runs the real renderer/renderer.js against a minimal DOM harness.
+// Runs the real renderer/renderer.js against a minimal DOM harness with a fake
+// clock, so debounced server-side searches are asserted deterministically.
 // Run with: npm run check:renderer   (node + assert, no test framework).
 const assert = require('assert');
 const { createHarness } = require('./test-support/renderer-stub');
@@ -8,8 +9,13 @@ const { createHarness } = require('./test-support/renderer-stub');
 const checks = [];
 const check = (name, fn) => checks.push({ name, fn });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
-const settle = async () => {
-  for (let i = 0; i < 5; i++) await tick();
+
+// The renderer debounces searches at 250 ms; tests advance a fake clock.
+const DEBOUNCE = 250;
+const settle = async (harness, ms = DEBOUNCE + 70) => {
+  for (let i = 0; i < 3; i++) await tick();
+  if (harness && ms) await harness.advance(ms);
+  for (let i = 0; i < 6; i++) await tick();
 };
 
 const CONFIG_WITHOUT_GITLAB = { baseUrl: 'https://jira.example', apiToken: 'jira-token' };
@@ -32,28 +38,47 @@ const BRANCHES = [
   { name: 'release/1.1.1' },
 ];
 
+// Emulates GitLab's `search` parameter: substring, case-insensitive.
+const matchesTerm = (label, term) =>
+  !term || String(label).toLowerCase().includes(String(term).toLowerCase());
+const filterProjects = (term) => PROJECTS.filter((project) => matchesTerm(project.pathWithNamespace, term));
+const filterBranches = (term) => BRANCHES.filter((branch) => matchesTerm(branch.name, term));
+
 const callNames = (harness, name) => harness.calls.filter((call) => call.name === name);
 const lastCall = (harness, name) => callNames(harness, name).slice(-1)[0];
+
+// Defaults: a server that answers `search` like GitLab does.
+function withProjects(...overrides) {
+  return Object.assign(
+    {
+      getGitlabProjects: (config, term) =>
+        Promise.resolve({ ok: true, projects: filterProjects(term), truncated: false }),
+      getGitlabBranches: (config, projectId, term) =>
+        Promise.resolve({ ok: true, branches: filterBranches(term), truncated: false }),
+    },
+    ...overrides
+  );
+}
 
 // The combobox markup pairs "<field>Input" with "<field>List".
 const listFor = (inputId) => inputId.replace('Input', 'List');
 
 // Opens the copy modal through the public path: search -> click the result.
 async function openCopyModalFlow(harness) {
-  await settle(); // Deja terminar init(): state.config se relee de forma asincrona.
+  await settle(harness);
   harness.el('searchInput').value = 'AAA-1';
   harness.el('searchForm').dispatch('submit');
-  await settle();
+  await settle(harness);
   const rows = harness.el('searchResults').children;
-  assert.ok(rows.length > 0, 'el buscador debe listar un resultado');
+  assert.ok(rows.length > 0, 'el buscador de Jira debe listar un resultado');
   rows[0].dispatch('click');
-  await settle();
+  await settle(harness);
 }
 
 async function toggleMr(harness, checked) {
   harness.el('includeMrCheckbox').checked = checked;
   harness.el('includeMrCheckbox').dispatch('change');
-  await settle();
+  await settle(harness);
 }
 
 async function startCopyWithMr(harness) {
@@ -61,11 +86,12 @@ async function startCopyWithMr(harness) {
   await toggleMr(harness, true);
 }
 
+// Types into a combobox, lets the debounce fire, returns what GitLab suggested.
 async function type(harness, inputId, text) {
   const input = harness.el(inputId);
   input.value = text;
   input.dispatch('input');
-  await settle();
+  await settle(harness);
   const list = harness.el(listFor(inputId));
   return { input, list, labels: list.optionTexts(), open: !list.classList.contains('hidden') };
 }
@@ -74,22 +100,21 @@ async function pick(harness, inputId, index) {
   const list = harness.el(listFor(inputId));
   assert.ok(list.children.length > index, `sugerencia ${index} inexistente en ${listFor(inputId)}`);
   list.children[index].dispatch('mousedown');
-  await settle();
+  await settle(harness);
 }
 
 async function key(harness, inputId, name) {
   harness.el(inputId).dispatch('keydown', { key: name, preventDefault: () => {} });
-  await settle();
+  await settle(harness);
 }
 
-function withProjects(apiResults) {
-  return Object.assign(
-    {
-      getGitlabProjects: { ok: true, projects: PROJECTS },
-      getGitlabBranches: { ok: true, branches: BRANCHES },
-    },
-    apiResults
-  );
+function fillJiraAndGitLab(harness, url, token) {
+  harness.el('baseUrl').value = CONFIG_WITHOUT_GITLAB.baseUrl;
+  harness.el('email').value = '';
+  harness.el('apiToken').value = CONFIG_WITHOUT_GITLAB.apiToken;
+  harness.el('updateUrl').value = '';
+  harness.el('gitlabUrl').value = url;
+  harness.el('gitlabToken').value = token;
 }
 
 check('S2 activar Obtener MR sin credenciales abre la configuracion y no consulta GitLab', async () => {
@@ -104,11 +129,11 @@ check('S2 activar Obtener MR sin credenciales abre la configuracion y no consult
 });
 
 check('S2 cancelar la configuracion vuelve a la copia sin el check marcado', async () => {
-  const h = createHarness({ apiResults: { getConfig: CONFIG_WITHOUT_GITLAB } });
+  const h = createHarness({ apiResults: withProjects({ getConfig: CONFIG_WITHOUT_GITLAB }) });
   await startCopyWithMr(h);
 
   h.el('cancelBtn').dispatch('click');
-  await settle();
+  await settle(h);
 
   assert.strictEqual(h.isHidden('copyModal'), false, 'la copia debe volver a estar visible');
   assert.strictEqual(h.el('includeMrCheckbox').checked, false);
@@ -116,16 +141,13 @@ check('S2 cancelar la configuracion vuelve a la copia sin el check marcado', asy
   assert.strictEqual(callNames(h, 'saveConfig').length, 0, 'cancelar no guarda credenciales');
 });
 
-check('S2 guardar credenciales desde la copia deja los buscadores disponibles', async () => {
+check('S2 guardar credenciales desde la copia deja los buscadores con sugerencias', async () => {
   const h = createHarness({ apiResults: withProjects({ getConfig: CONFIG_WITHOUT_GITLAB }) });
   await startCopyWithMr(h);
-  h.el('baseUrl').value = CONFIG_WITHOUT_GITLAB.baseUrl;
-  h.el('apiToken').value = CONFIG_WITHOUT_GITLAB.apiToken;
-  h.el('gitlabUrl').value = 'gitlab.example';
-  h.el('gitlabToken').value = 'gitlab-token';
+  fillJiraAndGitLab(h, 'gitlab.example', 'gitlab-token');
 
   h.el('saveGitlabCredentialsBtn').dispatch('click');
-  await settle();
+  await settle(h);
 
   assert.strictEqual(callNames(h, 'saveConfig').length, 1);
   assert.strictEqual(h.isHidden('modal'), true, 'la configuracion debe cerrarse al guardar');
@@ -147,13 +169,10 @@ check('S2 guardar credenciales desde la copia deja los buscadores disponibles', 
 check('S2 guardar la configuracion completa restablece los buscadores', async () => {
   const h = createHarness({ apiResults: withProjects({ getConfig: CONFIG_WITHOUT_GITLAB }) });
   await startCopyWithMr(h);
-  h.el('baseUrl').value = CONFIG_WITHOUT_GITLAB.baseUrl;
-  h.el('apiToken').value = CONFIG_WITHOUT_GITLAB.apiToken;
-  h.el('gitlabUrl').value = 'https://gitlab.example';
-  h.el('gitlabToken').value = 'gitlab-token';
+  fillJiraAndGitLab(h, 'https://gitlab.example', 'gitlab-token');
 
   h.el('configForm').dispatch('submit');
-  await settle();
+  await settle(h);
 
   assert.strictEqual(h.isHidden('gitlabSelection'), false, 'el panel debe verse tras guardar');
   assert.strictEqual(callNames(h, 'getGitlabProjects').length, 1);
@@ -162,17 +181,16 @@ check('S2 guardar la configuracion completa restablece los buscadores', async ()
 
 check('S2 un rechazo al guardar deja la configuracion abierta y sin buscadores activos', async () => {
   const h = createHarness({
-    apiResults: {
-      getConfig: CONFIG_WITHOUT_GITLAB,
-      saveConfig: { ok: false, error: 'La URL de GitLab debe usar HTTPS y no incluir credenciales' },
-    },
+    apiResults: withProjects(
+      { getConfig: CONFIG_WITHOUT_GITLAB },
+      { saveConfig: { ok: false, error: 'La URL de GitLab debe usar HTTPS y no incluir credenciales' } }
+    ),
   });
   await startCopyWithMr(h);
-  h.el('gitlabUrl').value = 'http://gitlab.example';
-  h.el('gitlabToken').value = 'gitlab-token';
+  fillJiraAndGitLab(h, 'http://gitlab.example', 'gitlab-token');
 
   h.el('saveGitlabCredentialsBtn').dispatch('click');
-  await settle();
+  await settle(h);
 
   assert.match(h.el('formMessage').textContent, /HTTPS/);
   assert.strictEqual(h.isHidden('modal'), false, 'la configuracion sigue abierta para corregirla');
@@ -197,11 +215,10 @@ check('S2 los buscadores usan la configuracion devuelta por el proceso principal
     }),
   });
   await startCopyWithMr(h);
-  h.el('gitlabUrl').value = 'gitlab.example';
-  h.el('gitlabToken').value = 'gitlab-token';
+  fillJiraAndGitLab(h, 'gitlab.example', 'gitlab-token');
 
   h.el('saveGitlabCredentialsBtn').dispatch('click');
-  await settle();
+  await settle(h);
 
   assert.strictEqual(callNames(h, 'getGitlabProjects').length, 1);
   assert.strictEqual(
@@ -215,11 +232,10 @@ check('S2 borrar credenciales limpia GitLab del estado del renderer', async () =
   const h = createHarness({ apiResults: withProjects({ getConfig: CONFIG_WITH_GITLAB }) });
   await startCopyWithMr(h);
   assert.strictEqual(h.isHidden('gitlabSelection'), false, 'con credenciales el panel se abre');
-  h.el('gitlabUrl').value = 'https://gitlab.example';
-  h.el('gitlabToken').value = 'otro-token';
+  fillJiraAndGitLab(h, 'https://gitlab.example', 'otro-token');
 
   h.el('removeGitlabCredentialsBtn').dispatch('click');
-  await settle();
+  await settle(h);
 
   const saved = lastCall(h, 'saveConfig').args[0];
   assert.strictEqual(saved.gitlabUrl, '');
@@ -229,14 +245,13 @@ check('S2 borrar credenciales limpia GitLab del estado del renderer', async () =
   assert.match(h.el('formMessage').textContent, /eliminadas/);
 });
 
-check('S2 una respuesta atrasada no sustituye los proyectos de la seleccion mas reciente', async () => {
+check('S2 una respuesta atrasada de proyectos no sustituye la seleccion mas reciente', async () => {
   let releaseStale;
   let calls = 0;
   const h = createHarness({
-    apiResults: {
+    apiResults: withProjects({
       getConfig: CONFIG_WITH_GITLAB,
-      getGitlabBranches: { ok: true, branches: BRANCHES },
-      getGitlabProjects: () => {
+      getGitlabProjects: (config, term) => {
         calls += 1;
         if (calls === 1) {
           return new Promise((resolve) => {
@@ -244,12 +259,11 @@ check('S2 una respuesta atrasada no sustituye los proyectos de la seleccion mas 
               resolve({ ok: true, projects: [{ id: 1, pathWithNamespace: 'viejo/proyecto' }] });
           });
         }
-        return Promise.resolve({ ok: true, projects: PROJECTS });
+        return Promise.resolve({ ok: true, projects: filterProjects(term) });
       },
-    },
+    }),
   });
   await startCopyWithMr(h);
-
   await toggleMr(h, false);
   await toggleMr(h, true);
 
@@ -257,8 +271,7 @@ check('S2 una respuesta atrasada no sustituye los proyectos de la seleccion mas 
   assert.deepStrictEqual(fresh.labels, ['equipo/notijira', 'equipo/chaty']);
 
   releaseStale();
-  await settle();
-
+  await settle(h);
   const afterStale = await type(h, 'gitlabProjectInput', 'viejo');
   assert.deepStrictEqual(
     afterStale.labels,
@@ -267,34 +280,182 @@ check('S2 una respuesta atrasada no sustituye los proyectos de la seleccion mas 
   );
 });
 
-check('S6 filtrar proyecto coincide por subcadena sin distinguir mayusculas', async () => {
+check('S7 al abrir el panel se carga la primera pagina sin texto', async () => {
   const h = createHarness({ apiResults: withProjects({ getConfig: CONFIG_WITH_GITLAB }) });
   await startCopyWithMr(h);
 
-  assert.strictEqual(callNames(h, 'getGitlabProjects').length, 1, 'el panel carga los proyectos');
+  const calls = callNames(h, 'getGitlabProjects');
+  assert.strictEqual(calls.length, 1);
+  assert.ok(!calls[0].args[1], 'la carga inicial no envia search');
+  assert.deepStrictEqual(h.el('gitlabProjectList').optionTexts(), []);
 
-  const upper = await type(h, 'gitlabProjectInput', 'NOTI');
-  assert.deepStrictEqual(upper.labels, ['equipo/notijira'], 'mayusculas indiferentes');
+  const focused = await type(h, 'gitlabProjectInput', '');
+  assert.deepStrictEqual(focused.labels, [
+    'equipo/notijira',
+    'equipo/chaty',
+    'otro/grupo-passbox',
+  ]);
+});
 
-  const partial = await type(h, 'gitlabProjectInput', 'grupo-pass');
-  assert.deepStrictEqual(partial.labels, ['otro/grupo-passbox'], 'subcadena interna del nombre');
+check('S7 escribir consulta a GitLab con debounce, no por cada tecla', async () => {
+  const h = createHarness({ apiResults: withProjects({ getConfig: CONFIG_WITH_GITLAB }) });
+  await startCopyWithMr(h);
+  assert.strictEqual(callNames(h, 'getGitlabProjects').length, 1);
 
-  const none = await type(h, 'gitlabProjectInput', 'inexistente');
-  assert.deepStrictEqual(none.labels, ['Sin coincidencias'], 'aviso explicito de cero coincidencias');
-  assert.strictEqual(none.open, true);
+  // Cuatro teclas seguidas: solo debe salir una peticion.
+  for (const text of ['n', 'no', 'not', 'noti']) {
+    h.el('gitlabProjectInput').value = text;
+    h.el('gitlabProjectInput').dispatch('input');
+    await settle(h, 120); // dentro de la ventana del retardo: no debe salir nada
+  }
+  assert.strictEqual(callNames(h, 'getGitlabProjects').length, 1, 'nada sale a la red antes del retardo');
+
+  await settle(h, DEBOUNCE);
+  const calls = callNames(h, 'getGitlabProjects');
+  assert.strictEqual(calls.length, 2, 'una sola peticion tras el retardo');
+  assert.strictEqual(calls[1].args[1], 'noti', 'se envia el ultimo texto escrito');
+  assert.deepStrictEqual(h.el('gitlabProjectList').optionTexts(), ['equipo/notijira']);
+});
+
+check('S7 origen y destino consultan de forma independiente', async () => {
+  const h = createHarness({ apiResults: withProjects({ getConfig: CONFIG_WITH_GITLAB }) });
+  await startCopyWithMr(h);
+  await type(h, 'gitlabProjectInput', 'notijira');
+  await pick(h, 'gitlabProjectInput', 0);
+
+  const before = callNames(h, 'getGitlabBranches').length;
+  await type(h, 'gitlabSourceBranchInput', 'feature');
+  await type(h, 'gitlabTargetBranchInput', 'release');
+
+  const calls = callNames(h, 'getGitlabBranches').slice(before);
+  assert.deepStrictEqual(calls.map((call) => call.args[2]), ['feature', 'release']);
+  assert.deepStrictEqual(h.el('gitlabSourceBranchList').optionTexts(), [
+    'feature/mr-copy',
+    'Feature/GITLAB-DIFF',
+  ]);
+  assert.deepStrictEqual(h.el('gitlabTargetBranchList').optionTexts(), ['release/1.1.1']);
+});
+
+check('S7 una respuesta atrasada no pisa la lista mas reciente del mismo campo', async () => {
+  let releaseStale;
+  let calls = 0;
+  const h = createHarness({
+    apiResults: withProjects({
+      getConfig: CONFIG_WITH_GITLAB,
+      getGitlabBranches: (config, projectId, term) => {
+        calls += 1;
+        if (calls === 2) {
+          return new Promise((resolve) => {
+            releaseStale = () => resolve({ ok: true, branches: [{ name: 'vieja/rama' }] });
+          });
+        }
+        return Promise.resolve({ ok: true, branches: [{ name: 'nueva/rama' }] });
+      },
+    }),
+  });
+  await startCopyWithMr(h);
+  await type(h, 'gitlabProjectInput', 'notijira');
+  await pick(h, 'gitlabProjectInput', 0);
+
+  h.el('gitlabSourceBranchInput').value = 'vvieja';
+  h.el('gitlabSourceBranchInput').dispatch('input');
+  await settle(h); // sale la peticion y se queda colgada
+  h.el('gitlabSourceBranchInput').value = 'nnueva';
+  h.el('gitlabSourceBranchInput').dispatch('input');
+  await settle(h);
+  assert.deepStrictEqual(h.el('gitlabSourceBranchList').optionTexts(), ['nueva/rama']);
+
+  releaseStale();
+  await settle(h);
+  assert.deepStrictEqual(
+    h.el('gitlabSourceBranchList').optionTexts(),
+    ['nueva/rama'],
+    'la respuesta lenta no debe reemplazar la lista actual'
+  );
+});
+
+check('S7 desmarcar el check descarta las busquedas que estan en vuelo', async () => {
+  let releasePending;
+  const h = createHarness({
+    apiResults: withProjects({
+      getConfig: CONFIG_WITH_GITLAB,
+      getGitlabProjects: (config, term) =>
+        term === 'lento'
+          ? new Promise((resolve) => {
+              releasePending = () => resolve({ ok: true, projects: filterProjects('') });
+            })
+          : Promise.resolve({ ok: true, projects: filterProjects(term) }),
+    }),
+  });
+  await startCopyWithMr(h);
+
+  h.el('gitlabProjectInput').value = 'lento';
+  h.el('gitlabProjectInput').dispatch('input');
+  await settle(h);
+  await toggleMr(h, false);
+
+  releasePending();
+  await settle(h);
+  assert.strictEqual(h.el('gitlabProjectList').optionTexts().length, 0, 'la respuesta tardia se ignora');
+});
+
+check('S7 avisa cuando GitLab devuelve la pagina completa', async () => {
+  const many = [];
+  for (let i = 0; i < 100; i++) many.push({ id: 500 + i, pathWithNamespace: `grupo/proyecto-${i}` });
+  const h = createHarness({
+    apiResults: withProjects({
+      getConfig: CONFIG_WITH_GITLAB,
+      getGitlabProjects: (config, term) =>
+        Promise.resolve(
+          term === 'muchos'
+            ? { ok: true, projects: many, truncated: true }
+            : { ok: true, projects: [], truncated: false }
+        ),
+    }),
+  });
+  await startCopyWithMr(h);
+  await type(h, 'gitlabProjectInput', 'muchos');
+
+  assert.match(h.el('gitlabMessage').textContent, /100/);
+  assert.match(h.el('gitlabMessage').textContent, /concreto/);
+});
+
+check('S7 un error de GitLab se muestra con el texto de siempre y deja reintentar', async () => {
+  let failing = true;
+  const h = createHarness({
+    apiResults: withProjects({
+      getConfig: CONFIG_WITH_GITLAB,
+      getGitlabProjects: (config, term) => {
+        if (failing) return Promise.resolve({ ok: false, error: 'GitLab respondio 401' });
+        return Promise.resolve({ ok: true, projects: filterProjects(term) });
+      },
+    }),
+  });
+  await startCopyWithMr(h);
 
   assert.strictEqual(
-    callNames(h, 'getGitlabProjects').length,
-    1,
-    'escribir no vuelve a consultar GitLab: se filtra la lista ya traida'
+    h.el('gitlabMessage').textContent,
+    'Error al consultar GitLab: GitLab respondio 401',
+    'el texto del error de proyectos no cambia respecto a la version anterior'
   );
+  assert.strictEqual(h.el('gitlabProjectInput').disabled, false, 'el buscador sigue usable tras el fallo');
 
-  const cleared = await type(h, 'gitlabProjectInput', '');
-  assert.deepStrictEqual(
-    cleared.labels,
-    ['equipo/notijira', 'equipo/chaty', 'otro/grupo-passbox'],
-    'sin texto se ofrecen todos los proyectos'
-  );
+  failing = false;
+  const typed = await type(h, 'gitlabProjectInput', 'notijira');
+  assert.deepStrictEqual(typed.labels, ['equipo/notijira'], 'se puede reintentar sin remarcar el check');
+});
+
+check('S7 las ramas se pueden editar en cuanto hay proyecto elegido', async () => {
+  const h = createHarness({ apiResults: withProjects({ getConfig: CONFIG_WITH_GITLAB }) });
+  await startCopyWithMr(h);
+
+  assert.strictEqual(h.el('gitlabSourceBranchInput').disabled, true, 'sin proyecto no hay ramas que buscar');
+  assert.strictEqual(h.el('gitlabTargetBranchInput').disabled, true);
+
+  await type(h, 'gitlabProjectInput', 'notijira');
+  await pick(h, 'gitlabProjectInput', 0);
+  assert.strictEqual(h.el('gitlabSourceBranchInput').disabled, false);
+  assert.strictEqual(h.el('gitlabTargetBranchInput').disabled, false);
 });
 
 check('S6 elegir una sugerencia fija el proyecto y carga sus ramas', async () => {
@@ -307,22 +468,25 @@ check('S6 elegir una sugerencia fija el proyecto y carga sus ramas', async () =>
   assert.strictEqual(h.el('gitlabProjectInput').value, 'equipo/chaty');
   assert.strictEqual(h.el('gitlabProjectList').classList.contains('hidden'), true);
   assert.strictEqual(h.el('gitlabProjectInput').getAttribute('aria-expanded'), 'false');
-  assert.strictEqual(callNames(h, 'getGitlabBranches').length, 1);
-  assert.strictEqual(lastCall(h, 'getGitlabBranches').args[1], '42');
+  const branchCalls = callNames(h, 'getGitlabBranches');
+  assert.strictEqual(branchCalls.length, 1, 'una sola carga de ramas al elegir proyecto');
+  assert.strictEqual(branchCalls[0].args[1], '42');
+  assert.ok(!branchCalls[0].args[2], 'la carga inicial de ramas no filtra por texto');
   assert.strictEqual(h.el('gitlabSourceBranchInput').disabled, false);
+  assert.strictEqual(h.el('gitlabTargetBranchInput').disabled, false);
 
   const src = await type(h, 'gitlabSourceBranchInput', 'feature');
   assert.deepStrictEqual(src.labels, ['feature/mr-copy', 'Feature/GITLAB-DIFF']);
+  const dst = await type(h, 'gitlabTargetBranchInput', 'release');
+  assert.deepStrictEqual(dst.labels, ['release/1.1.1']);
+});
 
-  await pick(h, 'gitlabSourceBranchInput', 0);
-  const dst = await type(h, 'gitlabTargetBranchInput', 'main');
-  assert.deepStrictEqual(dst.labels, ['main']);
+check('S6 sin proyecto elegido no se consultan las ramas', async () => {
+  const h = createHarness({ apiResults: withProjects({ getConfig: CONFIG_WITH_GITLAB }) });
+  await startCopyWithMr(h);
 
-  assert.strictEqual(
-    callNames(h, 'getGitlabBranches').length,
-    1,
-    'las ramas se filtran de la lista ya cargada'
-  );
+  await type(h, 'gitlabSourceBranchInput', 'main');
+  assert.strictEqual(callNames(h, 'getGitlabBranches').length, 0);
 });
 
 check('S6 el teclado baja por las sugerencias y confirma con Enter', async () => {
@@ -356,14 +520,14 @@ check('S6 un texto de proyecto sin coincidencia bloquea la copia y lo avisa', as
 
   await type(h, 'gitlabProjectInput', 'no-existe');
   h.el('copyDoBtn').dispatch('click');
-  await settle();
+  await settle(h);
 
   assert.strictEqual(callNames(h, 'copyIssue').length, 0, 'no se copia sin proyecto valido');
   const message = h.el('gitlabMessage').textContent + ' ' + h.el('copyMessage').textContent;
   assert.match(message, /proyecto/, `debe avisar del proyecto: ${message}`);
 });
 
-check('S6 copiar envia el proyecto elegido y la rama escrita exacta', async () => {
+check('S6 copiar envia el proyecto elegido y las ramas sugeridas confirmadas', async () => {
   const h = createHarness({
     apiResults: withProjects({
       getConfig: CONFIG_WITH_GITLAB,
@@ -384,38 +548,36 @@ check('S6 copiar envia el proyecto elegido y la rama escrita exacta', async () =
   await pick(h, 'gitlabProjectInput', 0);
   await type(h, 'gitlabSourceBranchInput', 'feature/mr-copy');
   await pick(h, 'gitlabSourceBranchInput', 0);
-  await type(h, 'gitlabTargetBranchInput', 'main');
-  h.el('gitlabTargetBranchInput').dispatch('blur');
-  await settle();
+  await type(h, 'gitlabTargetBranchInput', 'release');
+  await pick(h, 'gitlabTargetBranchInput', 0);
 
   h.el('copyDoBtn').dispatch('click');
-  await settle();
+  await settle(h);
 
   const payload = lastCall(h, 'copyIssue').args[1];
   assert.strictEqual(payload.includeMr, true);
   assert.strictEqual(payload.gitlab.projectId, '41');
   assert.strictEqual(payload.gitlab.projectName, 'equipo/notijira');
   assert.strictEqual(payload.gitlab.sourceBranch, 'feature/mr-copy');
-  assert.strictEqual(payload.gitlab.targetBranch, 'main', 'un nombre exacto escrito vale como seleccion');
+  assert.strictEqual(payload.gitlab.targetBranch, 'release/1.1.1');
   assert.match(h.el('statusBar').textContent, /diff de MR/);
 });
 
-check('S6 un nombre de ramo incompleto no vale: hay que elegir una sugerencia', async () => {
+check('S6 escribir una rama que GitLab no devuelve no vale como seleccion', async () => {
   const h = createHarness({ apiResults: withProjects({ getConfig: CONFIG_WITH_GITLAB }) });
   await startCopyWithMr(h);
 
   await type(h, 'gitlabProjectInput', 'notijira');
   await pick(h, 'gitlabProjectInput', 0);
-  await type(h, 'gitlabSourceBranchInput', 'feature');
+  await type(h, 'gitlabSourceBranchInput', 'inexistente');
   h.el('gitlabSourceBranchInput').dispatch('blur');
   await type(h, 'gitlabTargetBranchInput', 'main');
-  h.el('gitlabTargetBranchInput').dispatch('blur');
-  await settle();
+  await pick(h, 'gitlabTargetBranchInput', 0);
 
   h.el('copyDoBtn').dispatch('click');
-  await settle();
+  await settle(h);
 
-  assert.strictEqual(callNames(h, 'copyIssue').length, 0, 'no se copia con una rama ambigua');
+  assert.strictEqual(callNames(h, 'copyIssue').length, 0, 'no se copia con una rama inexistente');
   const message = h.el('gitlabMessage').textContent + ' ' + h.el('copyMessage').textContent;
   assert.match(message, /rama/, `debe avisar de la rama: ${message}`);
 });
@@ -434,8 +596,8 @@ check('S6 desmarcar Obtener MR limpia los buscadores y sus valores', async () =>
   for (const id of ['gitlabProjectInput', 'gitlabSourceBranchInput', 'gitlabTargetBranchInput']) {
     assert.strictEqual(h.el(id).value, '', `${id} queda vacio`);
     assert.strictEqual(h.el(id).disabled, true, `${id} queda deshabilitado`);
+    assert.strictEqual(h.el(listFor(id)).optionTexts().length, 0, `${listFor(id)} queda vacio`);
   }
-  assert.strictEqual(h.el('gitlabProjectList').optionTexts().length, 0);
 });
 
 check('S6 cambiar de proyecto descarta las ramas elegidas', async () => {
@@ -451,8 +613,11 @@ check('S6 cambiar de proyecto descarta las ramas elegidas', async () => {
   await type(h, 'gitlabProjectInput', 'chaty');
   await pick(h, 'gitlabProjectInput', 0);
 
-  assert.strictEqual(callNames(h, 'getGitlabBranches').length, 2);
-  assert.strictEqual(lastCall(h, 'getGitlabBranches').args[1], '42');
+  const branchCalls = callNames(h, 'getGitlabBranches');
+  const last = branchCalls[branchCalls.length - 1];
+  assert.strictEqual(last.args[1], '42', 'las ramas son del proyecto nuevo');
+  assert.ok(!last.args[2], 'la carga del proyecto nuevo no filtra por texto');
+  assert.ok(branchCalls.length > 2, 'cada campo y cada proyecto consultan por su lado');
   assert.strictEqual(h.el('gitlabSourceBranchInput').value, '', 'la rama del proyecto anterior se descarta');
   assert.strictEqual(h.el('gitlabTargetBranchInput').value, '');
 });

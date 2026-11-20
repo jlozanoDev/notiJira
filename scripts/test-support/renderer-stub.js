@@ -91,8 +91,41 @@ function makeElement(id, tag) {
   return el;
 }
 
+// Fake clock so the renderer's debounce timers are driven by the checks, never
+// by wall time. Advancing also flushes promise callbacks.
+function createClock() {
+  let now = 0;
+  let nextId = 1;
+  const timers = new Map();
+  return {
+    setTimeout: (fn, ms) => {
+      const id = nextId++;
+      timers.set(id, { at: now + Math.max(0, Number(ms) || 0), fn });
+      return id;
+    },
+    clearTimeout: (id) => timers.delete(id),
+    async advance(ms) {
+      const target = now + Math.max(0, Number(ms) || 0);
+      for (let guard = 0; guard < 200; guard++) {
+        const due = [...timers.entries()]
+          .filter(([, timer]) => timer.at <= target)
+          .sort((a, b) => a[1].at - b[1].at);
+        if (!due.length) break;
+        const [id, timer] = due[0];
+        timers.delete(id);
+        now = Math.max(now, timer.at);
+        timer.fn();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      now = Math.max(now, target);
+      await new Promise((resolve) => setImmediate(resolve));
+    },
+  };
+}
+
 // Mirrors preload.js; every entry is recorded so tests can assert on calls.
 function createHarness(options = {}) {
+  const clock = createClock();
   const apiResults = Object.assign(
     {
       getConfig: { baseUrl: 'https://jira.example', apiToken: 'jira-token' },
@@ -160,11 +193,8 @@ function createHarness(options = {}) {
     document,
     localStorage,
     console: { log: () => {}, error: () => {}, warn: () => {} },
-    setTimeout: (fn) => {
-      fn();
-      return 0;
-    },
-    clearTimeout: () => {},
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
     setInterval: () => 0,
     clearInterval: () => {},
     Promise,
@@ -194,6 +224,7 @@ function createHarness(options = {}) {
     api,
     calls,
     context,
+    advance: clock.advance,
     el: (id) => document.getElementById(id),
     isHidden: (id) => document.getElementById(id).classList.contains('hidden'),
   };

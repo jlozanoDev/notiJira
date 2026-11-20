@@ -5,9 +5,10 @@ contextBridge.exposeInMainWorld('api', {
   saveConfig: (config) => ipcRenderer.invoke('config:save', config),
   testConnection: (config) => ipcRenderer.invoke('jira:test', config),
   getNotifications: (config) => ipcRenderer.invoke('jira:notifications', config),
-  getGitlabProjects: (config) => ipcRenderer.invoke('gitlab:projects', config),
-  getGitlabBranches: (config, projectId) =>
-    ipcRenderer.invoke('gitlab:branches', { config, projectId }),
+  getGitlabProjects: (config, search) =>
+    ipcRenderer.invoke('gitlab:projects', { config, search }),
+  getGitlabBranches: (config, projectId, search) =>
+    ipcRenderer.invoke('gitlab:branches', { config, projectId, search }),
   searchIssues: (config, query) =>
     ipcRenderer.invoke('jira:searchIssues', { config, query }),
   getIssueCopyData: (config, issueKey) =>

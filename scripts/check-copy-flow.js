@@ -41,15 +41,33 @@ const server = http.createServer((req, res) => {
         res.end();
         return;
       }
-      return json([
+      const params = new URL(url, 'http://localhost').searchParams;
+      const term = (params.get('search') || '').toLowerCase();
+      if (term === 'muchos') {
+        const many = [];
+        for (let i = 0; i < 100; i++) {
+          many.push({ id: 900 + i, name: `proyecto-${i}`, path_with_namespace: `grupo/proyecto-${i}` });
+        }
+        return json(many);
+      }
+      const pool = [
         { id: 41, name: 'NotiJira', path_with_namespace: 'equipo/notijira' },
-      ]);
+        { id: 42, name: 'Chaty', path_with_namespace: 'equipo/chaty' },
+      ];
+      return json(pool.filter((p) => !term || p.path_with_namespace.toLowerCase().includes(term)));
     }
     if (url === '/redirect-target') return json([{ id: 99, name: 'Unexpected' }]);
-    if (url.startsWith('/api/v4/projects/41/repository/branches?')) return json([
-      { name: 'main' },
-      { name: 'feature/gitlab-diff' },
-    ]);
+    if (url.startsWith('/api/v4/projects/41/repository/branches?')) {
+      const params = new URL(url, 'http://localhost').searchParams;
+      const term = (params.get('search') || '').toLowerCase();
+      if (term === 'muchas') {
+        const many = [];
+        for (let i = 0; i < 100; i++) many.push({ name: `rama-${i}` });
+        return json(many);
+      }
+      const pool = [{ name: 'main' }, { name: 'feature/gitlab-diff' }];
+      return json(pool.filter((b) => !term || b.name.toLowerCase().includes(term)));
+    }
     if (url.startsWith('/api/v4/projects/41/repository/compare?')) {
       const refs = new URL(url, 'http://localhost').searchParams;
       if (refs.get('to') === 'feature/empty') return json({ diffs: [], compare_timeout: false });
@@ -282,10 +300,11 @@ check('config:save rejects a malformed GitLab URL', async (h, config) => {
 check('GitLab projects and branches are fetched with the configured token', async (h, config) => {
   requests = [];
   const gitlabConfig = { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' };
-  const projects = await h['gitlab:projects']({}, gitlabConfig);
+  const projects = await h['gitlab:projects']({}, { config: gitlabConfig });
   assert.strictEqual(projects.ok, true, projects.error);
   assert.deepStrictEqual(projects.projects.map((project) => project.pathWithNamespace), [
     'equipo/notijira',
+    'equipo/chaty',
   ]);
 
   const branches = await h['gitlab:branches']({}, { config: gitlabConfig, projectId: 41 });
@@ -298,6 +317,11 @@ check('GitLab projects and branches are fetched with the configured token', asyn
   assert.strictEqual(gitlabRequests.length, 2);
   assert.ok(gitlabRequests.every((request) => request.privateToken === 'gitlab-test-token'));
   assert.ok(gitlabRequests.every((request) => request.url.includes('per_page=100')));
+  assert.ok(gitlabRequests.every((request) => request.url.includes('page=1')));
+  assert.ok(
+    gitlabRequests.every((request) => !/[?&]search=/.test(request.url)),
+    'sin texto no se envia el parametro search'
+  );
 });
 
 check('copy:issue appends the selected GitLab source-to-target diff after Jira Markdown', async (h, config) => {
@@ -435,6 +459,83 @@ check('GitLab timeout and incomplete diffs fail without copying partial output',
     assert.strictEqual(result.ok, false, sourceBranch);
     assert.match(result.error, /GitLab/);
     assert.strictEqual(stub.__getClipboard(), '', sourceBranch);
+  }
+});
+
+// --- S7: busqueda en el servidor ------------------------------------------
+check('S7 gitlab:projects manda search y solo pide la pagina 1', async (h, config) => {
+  requests = [];
+  const gitlabConfig = { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' };
+  const result = await h['gitlab:projects']({}, { config: gitlabConfig, search: 'chaty' });
+  assert.strictEqual(result.ok, true, result.error);
+  assert.deepStrictEqual(result.projects.map((project) => project.pathWithNamespace), [
+    'equipo/chaty',
+  ]);
+  const calls = requests.filter((request) => request.url.startsWith('/api/v4/projects?'));
+  assert.strictEqual(calls.length, 1, 'una sola peticion por busqueda');
+  const params = new URL(calls[0].url, 'http://localhost').searchParams;
+  assert.strictEqual(params.get('search'), 'chaty');
+  assert.strictEqual(params.get('page'), '1');
+  assert.strictEqual(params.get('per_page'), '100');
+  assert.strictEqual(result.truncated, false);
+});
+
+check('S7 gitlab:branches manda search dentro del proyecto elegido', async (h, config) => {
+  requests = [];
+  const gitlabConfig = { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' };
+  const result = await h['gitlab:branches']({}, {
+    config: gitlabConfig,
+    projectId: 41,
+    search: 'feature',
+  });
+  assert.strictEqual(result.ok, true, result.error);
+  assert.deepStrictEqual(result.branches.map((branch) => branch.name), ['feature/gitlab-diff']);
+  const calls = requests.filter((request) =>
+    request.url.startsWith('/api/v4/projects/41/repository/branches?')
+  );
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(new URL(calls[0].url, 'http://localhost').searchParams.get('search'), 'feature');
+});
+
+check('S7 una pagina completa se marca como truncada sin pedir la siguiente', async (h, config) => {
+  requests = [];
+  const gitlabConfig = { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' };
+  const projects = await h['gitlab:projects']({}, { config: gitlabConfig, search: 'muchos' });
+  assert.strictEqual(projects.ok, true, projects.error);
+  assert.strictEqual(projects.projects.length, 100);
+  assert.strictEqual(projects.truncated, true, '100 resultados = puede haber mas');
+  const branches = await h['gitlab:branches']({}, {
+    config: gitlabConfig,
+    projectId: 41,
+    search: 'muchas',
+  });
+  assert.strictEqual(branches.truncated, true);
+  const pageTwo = requests.filter((request) => /[?&]page=2/.test(request.url));
+  assert.deepStrictEqual(pageTwo, [], 'no se recorre la pagina 2');
+});
+
+check('S7 la busqueda sigue enviando el token solo a GitLab', async (h, config) => {
+  requests = [];
+  const gitlabConfig = { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' };
+  await h['gitlab:projects']({}, { config: gitlabConfig, search: 'noti' });
+  const calls = requests.filter((request) => request.url.startsWith('/api/v4/'));
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].privateToken, 'gitlab-test-token');
+  assert.ok(!calls[0].url.includes('gitlab-test-token'), 'el token nunca va en la URL');
+});
+
+check('S7 no se envian parametros que la spec no pide', async (h, config) => {
+  requests = [];
+  const gitlabConfig = { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' };
+  await h['gitlab:projects']({}, { config: gitlabConfig, search: 'noti' });
+  await h['gitlab:branches']({}, { config: gitlabConfig, projectId: 41, search: 'feature' });
+  const calls = requests.filter((request) => request.url.startsWith('/api/v4/'));
+  assert.strictEqual(calls.length, 2);
+  for (const call of calls) {
+    const params = new URL(call.url, 'http://localhost').searchParams;
+    assert.ok(!params.has('order_by'), 'order_by no pedido: ' + call.url);
+    assert.ok(!params.has('sort'), 'sort no pedido: ' + call.url);
+    assert.ok(!params.has('regex'), 'regex no pedido: ' + call.url);
   }
 });
 

@@ -91,36 +91,48 @@ async function gitlabRequest(config, endpoint) {
   return response.json();
 }
 
-async function fetchGitLabPages(config, endpoint) {
-  const results = [];
-  for (let page = 1; page <= 100; page++) {
-    const params = new URLSearchParams({ per_page: '100', page: String(page) });
-    const batch = await gitlabRequest(config, `${endpoint}?${params.toString()}`);
-    if (!Array.isArray(batch)) throw new Error('GitLab devolvio una respuesta no valida');
-    results.push(...batch);
-    if (batch.length < 100) return results;
-  }
-  throw new Error('GitLab devolvio demasiados resultados; limita la lista de proyectos o ramas');
+// GitLab filtra en el servidor con `search`; se pide una sola pagina de 100 y
+// se avisa cuando viene llena para que el usuario concrete el texto.
+const GITLAB_PAGE_SIZE = 100;
+
+async function searchGitLabPage(config, endpoint, search) {
+  const params = new URLSearchParams({
+    per_page: String(GITLAB_PAGE_SIZE),
+    page: '1',
+  });
+  const term = String(search || '').trim();
+  if (term) params.set('search', term);
+
+  const batch = await gitlabRequest(config, `${endpoint}?${params.toString()}`);
+  if (!Array.isArray(batch)) throw new Error('GitLab devolvio una respuesta no valida');
+  return { items: batch, truncated: batch.length >= GITLAB_PAGE_SIZE };
 }
 
-async function getGitLabProjects(config) {
-  const projects = await fetchGitLabPages(config, '/projects');
-  return projects.map((project) => ({
-    id: project.id,
-    name: project.name || '',
-    pathWithNamespace: project.path_with_namespace || project.name || '',
-    webUrl: project.web_url || '',
-  }));
+async function getGitLabProjects(config, search) {
+  const { items, truncated } = await searchGitLabPage(config, '/projects', search);
+  return {
+    truncated,
+    projects: items.map((project) => ({
+      id: project.id,
+      name: project.name || '',
+      pathWithNamespace: project.path_with_namespace || project.name || '',
+      webUrl: project.web_url || '',
+    })),
+  };
 }
 
-async function getGitLabBranches(config, projectId) {
+async function getGitLabBranches(config, projectId, search) {
   const id = String(projectId || '').trim();
   if (!id) throw new Error('Selecciona un proyecto de GitLab');
-  const branches = await fetchGitLabPages(
+  const { items, truncated } = await searchGitLabPage(
     config,
-    `/projects/${encodeURIComponent(id)}/repository/branches`
+    `/projects/${encodeURIComponent(id)}/repository/branches`,
+    search
   );
-  return branches.map((branch) => ({ name: branch.name || '' })).filter((branch) => branch.name);
+  return {
+    truncated,
+    branches: items.map((branch) => ({ name: branch.name || '' })).filter((branch) => branch.name),
+  };
 }
 
 async function compareGitLabBranches(config, selection) {
@@ -887,9 +899,14 @@ ipcMain.handle('config:save', (_event, config) => {
   }
 });
 
-ipcMain.handle('gitlab:projects', async (_event, config) => {
+// admiten el payload { config, search } del renderer y devuelven truncated para
+// que la interfaz avise cuando GitLab llena la pagina.
+ipcMain.handle('gitlab:projects', async (_event, payload) => {
   try {
-    return { ok: true, projects: await getGitLabProjects(config) };
+    const config = payload && payload.config ? payload.config : payload;
+    const search = (payload && payload.search) || '';
+    const result = await getGitLabProjects(config, search);
+    return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -898,8 +915,12 @@ ipcMain.handle('gitlab:projects', async (_event, config) => {
 ipcMain.handle('gitlab:branches', async (_event, payload) => {
   try {
     const config = payload && payload.config;
-    const branches = await getGitLabBranches(config, payload && payload.projectId);
-    return { ok: true, branches };
+    const result = await getGitLabBranches(
+      config,
+      payload && payload.projectId,
+      (payload && payload.search) || ''
+    );
+    return { ok: true, ...result };
   } catch (err) {
     return { ok: false, error: err.message };
   }
