@@ -48,6 +48,17 @@
 - Check: test-first RED → GREEN where the current deterministic mock harness supports it; `npm run check:copy`, `npm run check:adf`, `node --check` on all touched JavaScript, structural IPC/UI checks, and an independent security-focused verification of credential handling.
 - Risk: items 2 and 4 (GitLab credentials are secrets; overlapping asynchronous project/branch requests must not overwrite newer selections).
 
+### S6 — Buscadores con sugerencias en proyecto y ramas
+
+> "modificando para que los selects de proyecto, rama origen y rama destino sea buscadores, en los que se escriba y te sugiera las que coincidan"
+
+- Los tres campos (proyecto, rama origen, rama destino) dejan de ser `<select>` y pasan a ser buscadores: se escribe texto y se sugiere cada elemento cuyo nombre contenga ese texto (sin distinguir mayúsculas).
+- Las sugerencias se filtran localmente sobre la lista ya traída de GitLab: escribir no dispara peticiones nuevas.
+- Se elige con clic, o con flechas + `Enter`; `Escape` cierra la lista y conserva la selección anterior.
+- Un texto escrito que no coincida con ningún elemento no cuenta como selección: al copiar se sigue exigiendo proyecto y ambas ramas elegidos de la lista.
+- Elegir proyecto vuelve a cargar las ramas de ese proyecto (misma guarda de respuestas atrasadas que ya existe).
+- Comprobación: sondeos en `npm run check:renderer` para filtrado por texto, sugerencia sin coincidencias, selección por clic y por teclado, valor final enviado a `copy:issue`, y que el panel siga viéndose tras guardar credenciales.
+
 ## Tasks
 
 | ID | Specs | Route | Status | Commit |
@@ -56,6 +67,8 @@
 | T2 | S1, S4 | inline | done | 4f26c34 |
 | T3 | S3, S4 | inline | done — release v1.1.0 publicada | ad66f8e |
 | T4 | S1-S4 | delegated verifier after implementation checks | done | 4f26c34 + ad66f8e |
+| T5 | S6, S4 | inline | done | ver L19 |
+| T6 | S3, S6 | inline | in progress | pending |
 
 - T1: GitLab credential setup/removal, authenticated project listing, and project choice.
 - T2: branch listing, source/target selection, comparison retrieval, and diff appended to the existing Markdown copy.
@@ -84,3 +97,6 @@
 - L16 (revisión nativa RDD): evaluación escalada a `high` (item 2) sobre `21f9fd9`; consentimiento concedido por el humano; `review start` creó el linaje `review-a449c799828a91cc` con 3 lentes. El `review status` vinculado devolvió `operation_timeout` en `pre_native` (`retry_safe:false`, `next_action:stop`, `mutation_outcome:not_started`): no se relanzó ni se abandonó el linaje, no hay receipt y la entrega siguió la política ordinaria. Reportado como ocurrencia en Gentle AI #6153 (comentario `7021107337`).
 - L17 (publicación, autorización explícita del usuario: sesión `gh` de `jlozanoDev` sobre `jlozanoDev/notiJira`): rama subida, PR #2 creado y fusionado a `main` con merge commit `2d04cba` (árbol idéntico al commit del que se compilaron los instaladores), tag anotado `v1.1.0` → `2d04cba` empujado, release `v1.1.0` publicada (2026-11-19T20:25:00Z) con `NotiJira.Setup.1.1.0.exe` (76.550.989 B) y `NotiJira.1.1.0.exe` (76.335.512 B); ambas URLs devuelven HTTP 200. GitHub convierte los espacios del nombre en puntos, por lo que el README enlaza los nombres con puntos.
 - L18 (cierre): fix `07c6304` en `main` corrige el README y la nota de la release a los nombres reales de los assets y documenta la conversión espacios→puntos. Ejecución real: `electron . --enable-logging` mantuvo la ventana viva 12 s sin errores en stderr. Suite final en `main`: `check:copy` 26/26, `check:renderer` 8/8, `check:adf` 13/13, `git diff --check` limpio, árbol de trabajo limpio. Queda pendiente solo la DoD interactiva del usuario (`npm start` → configurar GitLab → marcar Obtener MR → pegar la copia en OpenCode). Feature cerrada; la rama `feature/gitlab-mr-copy` se conserva en el remoto.
+- L19 (petición de la 1.1.1, verbatim): "crea la version 1.1.1, modificando para que los selects de proyecto, rama origen y rama destino sea buscadores, en los que se escriba y te sugiera las que coincidan. Actualiza al final  el exe y el readme y añade el tag/release en github". Se añade S6 y las tareas T5/T6; la rama es `feature/gitlab-combo-search` desde `main` (`e61bf52`).
+- L20 (T5, inline): los tres `<select>` pasan a combobox en `renderer/renderer.js` (`createGitlabCombo`: filtro local por subcadena sin distinguir mayúsculas, máximo 12 sugerencias, clic con `mousedown`, flechas + `Enter`, `Escape` conserva la elección, `blur`/`Enter` confirman solo un nombre exacto, `aria-expanded`/`role=listbox`). Cambiar de proyecto limpia y recarga las ramas; desmarcar el check resetea los tres. `index.html` lleva `.combo` con input + `ul`; `styles.css` gana `.combo-list`/`.combo-option`/`.combo-empty` y pierde las reglas `.modal select` ya sin uso. No hay peticiones nuevas por tecla: se filtra la lista ya cargada.
+- L21 (pruebas T5, RED→GREEN): `scripts/check-renderer-gitlab.js` pasa de 8 a 16 aserciones y ahora abre la modal de copia por el camino público (buscar → clic en el resultado); el DOM simulado gana `className` sincronizado con `classList`, `setAttribute/getAttribute` y `searchIssues`. RED observado: 0/16 antes del combobox. GREEN: `check:renderer` 16/16, `check:copy` 26/26 (prueba estructural actualizada a los nuevos IDs), `check:adf` 13/13, `node --check` limpio en los 6 JS tocados y 49/49 IDs del renderer presentes en `index.html`. `main.js`, `preload.js` y `adf.js` quedan intactos, así que el contrato del proceso principal lo sigue fijando `check:copy` (incluida la regresión de notificaciones y la forma antigua de la respuesta de copia); las 8 aserciones previas de S2 (recuperación tras credenciales, config normalizada, borrado, respuestas atrasadas) se conservan sobre el nuevo DOM. Riesgo: ninguno (capa de presentación; payload `copy:issue` e IPC sin cambios).

@@ -48,6 +48,17 @@ function makeElement(id, tag) {
     },
   };
 
+  Object.defineProperty(el, 'className', {
+    get: () => Array.from(el._classes).join(' '),
+    set: (value) => {
+      el._classes.clear();
+      String(value || '')
+        .split(/\s+/)
+        .filter(Boolean)
+        .forEach((name) => el._classes.add(name));
+    },
+  });
+
   Object.defineProperty(el, 'innerHTML', {
     get: () => el._html,
     set: (value) => {
@@ -69,6 +80,10 @@ function makeElement(id, tag) {
     return queued.length;
   };
   el.focus = () => {};
+  el.setAttribute = (name, value) => {
+    el[name] = String(value);
+  };
+  el.getAttribute = (name) => el[name];
   el.querySelector = () => makeElement(`${el.id}-child`, 'span');
   el.optionTexts = () =>
     el.children.map((child) => child.textContent).filter((text) => text !== '');
@@ -84,6 +99,19 @@ function createHarness(options = {}) {
       saveConfig: { ok: true },
       testConnection: { ok: true, displayName: 'Ana' },
       getNotifications: { ok: true, notifications: [] },
+      searchIssues: {
+        ok: true,
+        results: [
+          {
+            key: 'AAA-1',
+            summary: 'Tarea de prueba',
+            status: 'Abierta',
+            issuetype: 'Tarea',
+            updated: '2026-11-01T10:00:00.000Z',
+            webUrl: 'https://jira.example/browse/AAA-1',
+          },
+        ],
+      },
       getIssueCopyData: {
         ok: true,
         issue: { key: 'AAA-1', summary: 'Tarea', url: 'https://jira.example/browse/AAA-1' },

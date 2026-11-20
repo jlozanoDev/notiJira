@@ -223,25 +223,67 @@
         </div>
         <p id="copySubtitle" class="copy-subtitle">Cargando...</p>
         <div id="gitlabSelection" class="gitlab-selection hidden">
-          <label>
-            Proyecto de GitLab
-            <select id="gitlabProjectSelect" disabled>
-              <option value="">Selecciona un proyecto</option>
-            </select>
-          </label>
+          <div class="combo">
+            <label for="gitlabProjectInput">Proyecto de GitLab</label>
+            <input
+              id="gitlabProjectInput"
+              class="combo-input"
+              type="text"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="gitlabProjectList"
+              aria-expanded="false"
+              autocomplete="off"
+              disabled
+            />
+            <ul
+              id="gitlabProjectList"
+              class="combo-list hidden"
+              role="listbox"
+              aria-label="Proyectos de GitLab"
+            ></ul>
+          </div>
           <div class="branch-selectors">
-            <label>
-              Rama de origen
-              <select id="gitlabSourceBranchSelect" disabled>
-                <option value="">Selecciona una rama</option>
-              </select>
-            </label>
-            <label>
-              Rama de destino
-              <select id="gitlabTargetBranchSelect" disabled>
-                <option value="">Selecciona una rama</option>
-              </select>
-            </label>
+            <div class="combo">
+              <label for="gitlabSourceBranchInput">Rama de origen</label>
+              <input
+                id="gitlabSourceBranchInput"
+                class="combo-input"
+                type="text"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls="gitlabSourceBranchList"
+                aria-expanded="false"
+                autocomplete="off"
+                disabled
+              />
+              <ul
+                id="gitlabSourceBranchList"
+                class="combo-list hidden"
+                role="listbox"
+                aria-label="Ramas de origen"
+              ></ul>
+            </div>
+            <div class="combo">
+              <label for="gitlabTargetBranchInput">Rama de destino</label>
+              <input
+                id="gitlabTargetBranchInput"
+                class="combo-input"
+                type="text"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls="gitlabTargetBranchList"
+                aria-expanded="false"
+                autocomplete="off"
+                disabled
+              />
+              <ul
+                id="gitlabTargetBranchList"
+                class="combo-list hidden"
+                role="listbox"
+                aria-label="Ramas de destino"
+              ></ul>
+            </div>
           </div>
         </div>
         <div id="gitlabMessage" class="form-message"></div>
