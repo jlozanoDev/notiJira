@@ -39,6 +39,8 @@ Handlers never throw to the renderer: they catch and return `{ ok: false, error 
 
 The copy flow can request a GitLab branch comparison through `copy:issue`; GitLab API traffic and clipboard writes stay in the main process. The renderer chooses a project visible to the token, then its source and target branches, each through a searchable combobox: the typed text is sent to GitLab as the `search` parameter (debounced 250 ms, one page of 100), so the suggestions are whatever GitLab returns and a filled page is reported as truncated. Typing an exact label commits it on Enter or blur — after asking GitLab if the list is closed; copy requires a project plus both branches, and changing the project discards the chosen branches. A field stays editable while it can still be searched: projects always, branches once a project is chosen, so a failed request never strands the user.
 
+After a project is selected, the source-branch combobox searches with the Jira issue key and the target-branch combobox searches with `develop`. An exact returned match is selected automatically; otherwise the typed default stays editable with GitLab's suggestions.
+
 `config:save` returns `{ ok: true }` or `{ ok: false, error }`; it never rejects across IPC. A rejected save leaves `config.json` untouched, so the renderer must check `ok` and keep the settings modal open. After a successful save the renderer re-reads `getConfig()` because the main process normalizes the URLs. If the settings modal was opened from the copy flow (`state.returnToCopyModal`), `restoreCopyModalAfterGitlabSetup()` reopens the copy modal with the GitLab panel visible — do not replace it with a plain `closeModal()`, that leaves the selectors hidden.
 
 ## Jira access

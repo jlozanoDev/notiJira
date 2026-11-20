@@ -4,7 +4,7 @@ Aplicación de escritorio para Windows que vigila Jira y te avisa cuando te menc
 
 ## Descargar
 
-[Descargar NotiJira v1.1.2 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.1.2). En **Assets**, elige `NotiJira.Setup.1.1.2.exe` para instalar o `NotiJira.1.1.2.exe` para usar la versión portable.
+[Descargar NotiJira v1.1.3 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.1.3). En **Assets**, elige `NotiJira.Setup.1.1.3.exe` para instalar o `NotiJira.1.1.3.exe` para usar la versión portable.
 
 ## Ruta rápida
 
@@ -36,6 +36,8 @@ El token de Jira se guarda en texto plano en `config.json` dentro de la carpeta 
 
 En **Configuracion → GitLab**, introduce la URL HTTPS de tu instancia y un token de acceso con permiso `api`. La aplicación busca en GitLab los proyectos accesibles para ese token y, al marcar **Obtener MR** al copiar una tarea, puedes escribir en los buscadores de proyecto, rama de origen y rama de destino: cada texto se envía a GitLab (parámetro `search`, con retardo de un cuarto de segundo) y sugiere lo que coincida. Se elige con un clic o con las flechas + `Enter`; `Escape` cierra sin perder la elección anterior. Escribir el nombre completo de una rama también vale, siempre que GitLab lo devuelva tal cual.
 
+Al elegir un proyecto, el buscador de origen empieza por la clave de la tarea Jira y el de destino por `develop`. Si GitLab devuelve una rama que coincide exactamente con el valor predeterminado, queda seleccionada automáticamente; si no, puedes elegir otra coincidencia.
+
 Cada búsqueda trae una página de 100 resultados. Si GitLab la llena, el aviso te pide que concretes más el texto.
 
 El diff de la comparación se añade al final del Markdown copiado. Las credenciales de GitLab se guardan en texto plano junto a la configuración local; puedes eliminarlas desde el mismo apartado. El token se envía únicamente a la URL de GitLab configurada y nunca se incluye en logs ni en el texto copiado. HTTP solo se admite para pruebas en `localhost`.
@@ -62,8 +64,8 @@ El diff de la comparación se añade al final del Markdown copiado. Las credenci
 | `npm run pack` | Genera la app sin instalador en `dist/` |
 | `npm run dist` | Genera el instalador NSIS y la versión portable en `dist/` |
 | `npm run check:adf` | Comprueba el conversor ADF→Markdown (13 aserciones) |
-| `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira y un GitLab simulados (31 aserciones) |
-| `npm run check:renderer` | Comprueba la parte de GitLab de la modal de copia con el `renderer.js` real y un DOM simulado (24 aserciones) |
+| `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira y un GitLab simulados (33 aserciones) |
+| `npm run check:renderer` | Comprueba la parte de GitLab de la modal de copia con el `renderer.js` real y un DOM simulado (27 aserciones) |
 | `npm run serve:dist` | Sirve `dist/` por HTTP para el actualizador. Usa `PORT` (por defecto 8080) |
 | `npx electron scripts/make-icon.js` | Regenera `assets/icon.png` y `assets/icon.ico` desde `assets/jira.svg` |
 

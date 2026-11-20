@@ -65,7 +65,13 @@ const server = http.createServer((req, res) => {
         for (let i = 0; i < 100; i++) many.push({ name: `rama-${i}` });
         return json(many);
       }
-      const pool = [{ name: 'main' }, { name: 'feature/gitlab-diff' }];
+      const pool = [
+        { name: 'main' },
+        { name: 'develop' },
+        { name: 'AAA-1' },
+        { name: 'feature/AAA-1-fix' },
+        { name: 'feature/gitlab-diff' },
+      ];
       return json(pool.filter((b) => !term || b.name.toLowerCase().includes(term)));
     }
     if (url.startsWith('/api/v4/projects/41/repository/compare?')) {
@@ -311,6 +317,9 @@ check('GitLab projects and branches are fetched with the configured token', asyn
   assert.strictEqual(branches.ok, true, branches.error);
   assert.deepStrictEqual(branches.branches.map((branch) => branch.name), [
     'main',
+    'develop',
+    'AAA-1',
+    'feature/AAA-1-fix',
     'feature/gitlab-diff',
   ]);
   const gitlabRequests = requests.filter((request) => request.url.startsWith('/api/v4/'));
@@ -322,6 +331,51 @@ check('GitLab projects and branches are fetched with the configured token', asyn
     gitlabRequests.every((request) => !/[?&]search=/.test(request.url)),
     'sin texto no se envia el parametro search'
   );
+});
+
+check('S7 gitlab:projects sends the server-side search and reports a full page', async (h, config) => {
+  requests = [];
+  const gitlabConfig = { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' };
+  const projects = await h['gitlab:projects']({}, { config: gitlabConfig, search: 'chaty' });
+  assert.strictEqual(projects.ok, true, projects.error);
+  assert.deepStrictEqual(projects.projects.map((project) => project.pathWithNamespace), [
+    'equipo/chaty',
+  ]);
+  const call = requests.find((request) => request.url.startsWith('/api/v4/projects?'));
+  const params = new URL(call.url, 'http://localhost').searchParams;
+  assert.strictEqual(params.get('search'), 'chaty');
+  assert.strictEqual(params.get('page'), '1');
+  assert.strictEqual(params.get('per_page'), '100');
+  assert.strictEqual(projects.truncated, false);
+
+  requests = [];
+  const fullPage = await h['gitlab:projects']({}, { config: gitlabConfig, search: 'muchos' });
+  assert.strictEqual(fullPage.ok, true, fullPage.error);
+  assert.strictEqual(fullPage.projects.length, 100);
+  assert.strictEqual(fullPage.truncated, true);
+  assert.strictEqual(requests.filter((request) => /[?&]page=2/.test(request.url)).length, 0);
+});
+
+check('S7 gitlab:branches sends search for the selected project only', async (h, config) => {
+  requests = [];
+  const gitlabConfig = { ...config, gitlabUrl: config.baseUrl, gitlabToken: 'gitlab-test-token' };
+  const branches = await h['gitlab:branches']({}, {
+    config: gitlabConfig,
+    projectId: 41,
+    search: 'feature/gitlab',
+  });
+  assert.strictEqual(branches.ok, true, branches.error);
+  assert.deepStrictEqual(
+    branches.branches.map((branch) => branch.name),
+    ['feature/gitlab-diff'],
+    `GitLab returned unexpected branches: ${JSON.stringify(branches)}`
+  );
+  assert.strictEqual(branches.truncated, false);
+  const call = requests.find((request) => request.url.includes('/repository/branches?'));
+  const params = new URL(call.url, 'http://localhost').searchParams;
+  assert.strictEqual(params.get('search'), 'feature/gitlab');
+  assert.strictEqual(params.get('page'), '1');
+  assert.strictEqual(params.get('per_page'), '100');
 });
 
 check('copy:issue appends the selected GitLab source-to-target diff after Jira Markdown', async (h, config) => {
@@ -489,7 +543,10 @@ check('S7 gitlab:branches manda search dentro del proyecto elegido', async (h, c
     search: 'feature',
   });
   assert.strictEqual(result.ok, true, result.error);
-  assert.deepStrictEqual(result.branches.map((branch) => branch.name), ['feature/gitlab-diff']);
+  assert.deepStrictEqual(result.branches.map((branch) => branch.name), [
+    'feature/AAA-1-fix',
+    'feature/gitlab-diff',
+  ]);
   const calls = requests.filter((request) =>
     request.url.startsWith('/api/v4/projects/41/repository/branches?')
   );

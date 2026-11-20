@@ -942,9 +942,10 @@ function createGitlabCombo(input, list, options) {
       if (!result.ok) {
         combo.applySearchItems([], false);
         setGitlabMessage(`Error al consultar ${combo.label}: ${result.error}`, 'error');
-        return;
+        return result;
       }
       combo.applySearchItems(result.items, result.truncated);
+      return result;
     };
     if (immediate) return run();
     return new Promise((resolve) => {
@@ -952,6 +953,24 @@ function createGitlabCombo(input, list, options) {
         run().then(resolve, resolve);
       }, COMBO_SEARCH_DEBOUNCE_MS);
     });
+  };
+
+  combo.search = async (query, options = {}) => {
+    const term = String(query || '').trim();
+    combo.selected = null;
+    combo.input.value = term;
+    combo.active = -1;
+    combo.refreshDisabled();
+    combo.setOpen(options.open !== false);
+
+    const result = await combo.request(term, options.immediate !== false);
+    if (!result || !result.ok || options.selectExact !== true) return result;
+
+    const exact = combo.items.find(
+      (item) => item.label.trim().toLowerCase() === term.toLowerCase()
+    );
+    if (exact) combo.choose(exact);
+    return result;
   };
 
   // Solo texto escrito: vale si es el nombre exacto de una sugerencia. Si la
@@ -1124,43 +1143,43 @@ function loadGitlabProjects() {
   return gitlabProjectCombo.request('', true);
 }
 
-// Al elegir proyecto se recargan las dos ramas desde cero, con una sola
-// peticion inicial y sin arrastrar la eleccion anterior.
+// Al elegir proyecto se inicia la busqueda por defecto para cada rama:
+// la clave Jira en origen y `develop` en destino.
 async function loadGitlabBranches(projectId) {
   gitlabSourceCombo.reset();
   gitlabTargetCombo.reset();
   const session = state.gitlabSession;
-  const sourceSeq = gitlabSourceCombo.seq;
-  const targetSeq = gitlabTargetCombo.seq;
   if (!projectId) {
     setGitlabMessage('', '');
     return;
   }
 
-  setGitlabMessage('Consultando ramas de GitLab...', '');
-  let result;
-  try {
-    result = await fetchGitlabBranchItems('');
-  } catch (err) {
-    result = { ok: false, error: err.message };
-  }
-  if (session !== state.gitlabSession || !els.includeMrCheckbox.checked) return;
-
-  if (!result.ok) {
-    if (sourceSeq === gitlabSourceCombo.seq) {
-      setGitlabMessage(`Error al consultar las ramas: ${result.error}`, 'error');
-    }
+  const issueKey =
+    state.copyData && state.copyData.issue
+      ? String(state.copyData.issue.key || '').trim()
+      : '';
+  if (!issueKey) {
+    setGitlabMessage('No se pudo obtener la clave Jira para buscar la rama de origen.', 'error');
     return;
   }
-  if (sourceSeq === gitlabSourceCombo.seq) gitlabSourceCombo.applyItems(result.items);
-  if (targetSeq === gitlabTargetCombo.seq) gitlabTargetCombo.applyItems(result.items);
-  if (sourceSeq !== gitlabSourceCombo.seq && targetSeq !== gitlabTargetCombo.seq) return;
-  if (noteTruncated(result.truncated)) return;
+
+  const [sourceResult, targetResult] = await Promise.all([
+    gitlabSourceCombo.search(issueKey, { immediate: true, open: true, selectExact: true }),
+    gitlabTargetCombo.search('develop', { immediate: true, open: true, selectExact: true }),
+  ]);
+  if (session !== state.gitlabSession || !els.includeMrCheckbox.checked) return;
+
+  if (
+    (sourceResult && sourceResult.truncated) ||
+    (targetResult && targetResult.truncated)
+  ) {
+    noteTruncated(true);
+    return;
+  }
+  if (!sourceResult || !sourceResult.ok || !targetResult || !targetResult.ok) return;
   setGitlabMessage(
-    result.items.length
-      ? `${result.items.length} rama(s). Escribe para buscar y elige origen y destino.`
-      : 'No se encontraron ramas.',
-    result.items.length ? 'ok' : 'error'
+    `Búsquedas predeterminadas: origen ${issueKey}, destino develop. Escribe para ajustar cualquiera.`,
+    'ok'
   );
 }
 
