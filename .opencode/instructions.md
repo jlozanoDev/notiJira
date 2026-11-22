@@ -32,6 +32,9 @@ The renderer never touches `fs`, `fetch`, or Node APIs. `main.js` owns all I/O.
 | `jira:notifications` | `getNotifications(cfg)` | `fetchNotifications` | `{ ok, notifications }` or `{ ok: false, error }` |
 | `gitlab:projects` | `getGitlabProjects(cfg, search)` | one `GET /projects` page filtered by `search` | `{ ok, projects, truncated }` or `{ ok: false, error }` |
 | `gitlab:branches` | `getGitlabBranches(cfg, projectId, search)` | one `GET /projects/:id/repository/branches` page filtered by `search` | `{ ok, branches, truncated }` or `{ ok: false, error }` |
+| `jira:searchIssues` | `searchIssues(cfg, query)` | key lookup, else JQL `text ~` search | `{ ok, results }` or `{ ok: false, error }` |
+| `jira:issueCopyData` | `getIssueCopyData(cfg, issueKey)` | `getCachedCopyRaw`, then a preview | `{ ok, issue, sections, comments, attachments }` or `{ ok: false, error }` |
+| `copy:issue` | `copyIssue(cfg, payload)` | builds the Markdown, downloads assets, writes the clipboard | `{ ok, sections, comments, attachments, downloaded, failed, chars, folder }` or `{ ok: false, error }` |
 | `shell:openExternal` | `openExternal(url)` | validates `^https?://`, then `shell.openExternal` | `boolean` |
 | `notify` | `notify(payload)` | native `Notification` | `boolean` |
 

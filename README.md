@@ -111,7 +111,7 @@ Si el campo queda vacío, se usa la URL de `build.publish` de `package.json`. La
 
 ## Limitaciones conocidas
 
-- No hay tests automatizados ni linter; la verificación es manual ejecutando la app.
+- No hay framework de tests ni linter. Los scripts `check:adf`, `check:copy` y `check:renderer` son regresiones headless con Node y `assert`; el resto se verifica a mano ejecutando la app.
 - Jira Cloud no expone un feed de notificaciones fiable, así que la app escanea comentarios: hasta 100 issues y 10 páginas de comentarios por issue.
 - El estado de lectura es local a cada equipo; no se sincroniza con Jira ni entre instalaciones.
 - La app está pensada para una sola cuenta de Jira por equipo.
