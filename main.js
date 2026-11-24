@@ -1,4 +1,16 @@
-const { app, BrowserWindow, ipcMain, shell, Notification, clipboard } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  shell,
+  Notification,
+  clipboard,
+  globalShortcut,
+  Tray,
+  Menu,
+  screen,
+  nativeImage,
+} = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
@@ -706,6 +718,7 @@ let copyCache = { key: '', at: 0, raw: null };
 
 async function getCachedCopyRaw(config, issueKey) {
   const key = String(issueKey || '').trim().toUpperCase();
+  lastIssueKey = /^[A-Z][A-Z0-9_]*-\d+$/.test(key) ? key : lastIssueKey;
   const fresh =
     copyCache.raw &&
     copyCache.key === key &&
@@ -878,6 +891,580 @@ async function copyIssueToClipboard(config, issueKey, selection) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Bandeja de incidencias (captura rapida)
+// ---------------------------------------------------------------------------
+
+const DEFAULT_BUG_HOTKEY = 'Control+Alt+J';
+const BUG_STATES = ['new', 'created', 'archived'];
+const MAX_BUG_IMAGES = 20;
+const MAX_BUG_IMAGE_BYTES = 10 * 1024 * 1024;
+const MAX_BUG_TITLE = 300;
+const MAX_BUG_DETAILS = 20000;
+const MAX_BUG_LINKS = 10;
+const BUG_ID_PATTERN = /^b-\d{14}-[0-9a-f]{4}$/;
+const BUG_IMAGE_PATTERN = /^img-\d+\.(png|jpg|gif|webp)$/;
+const IMAGE_EXTENSION_BY_TYPE = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/jpg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+const IMAGE_MIME_BY_EXTENSION = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+};
+
+let captureWindow = null;
+let tray = null;
+let isQuitting = false;
+let activeBugHotkey = '';
+let lastIssueKey = '';
+
+function bugsRoot() {
+  return path.join(app.getPath('userData'), 'bugs');
+}
+
+function bugDir(id) {
+  return path.join(bugsRoot(), id);
+}
+
+function bugNotePath(id) {
+  return path.join(bugDir(id), 'nota.json');
+}
+
+function bugDraftPath() {
+  return path.join(bugsRoot(), '.draft.json');
+}
+
+function newBugId() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, '0');
+  const stamp =
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  const suffix = Math.random().toString(16).slice(2, 6).padEnd(4, '0');
+  return `b-${stamp}-${suffix}`;
+}
+
+// Un enlace se etiqueta por su origen: el usuario captura lo mismo desde el
+// navegador, Slack o un comentario de Jira.
+function classifyLink(url) {
+  const text = String(url || '').trim();
+  if (!text) return null;
+  if (!/^https?:\/\//i.test(text)) return { url: text, kind: 'otro' };
+  if (/\.slack\.com\/archives\//i.test(text)) return { url: text, kind: 'slack' };
+  if (/\/browse\/[A-Za-z][A-Za-z0-9_]*-\d+/i.test(text)) return { url: text, kind: 'jira' };
+  return { url: text, kind: 'web' };
+}
+
+function issueKeyFromText(text) {
+  const direct = parseIssueKey(text);
+  if (direct) return direct;
+  const match = String(text || '').match(/\/browse\/([A-Za-z][A-Za-z0-9_]*-\d+)/i);
+  return match ? parseIssueKey(match[1]) : '';
+}
+
+function normalizeBugLinks(links) {
+  if (!Array.isArray(links)) return [];
+  const normalized = [];
+  for (const link of links.slice(0, MAX_BUG_LINKS)) {
+    const parsed = classifyLink(typeof link === 'string' ? link : link && link.url);
+    if (!parsed) continue;
+    if (normalized.some((item) => item.url === parsed.url)) continue;
+    normalized.push(parsed);
+  }
+  return normalized;
+}
+
+function normalizeBugNote(raw) {
+  const note = raw && typeof raw === 'object' ? raw : {};
+  const createdAt =
+    typeof note.createdAt === 'string' && note.createdAt
+      ? note.createdAt
+      : new Date().toISOString();
+  return {
+    id: typeof note.id === 'string' ? note.id : '',
+    title: String(note.title || '').slice(0, MAX_BUG_TITLE),
+    details: String(note.details || '').slice(0, MAX_BUG_DETAILS),
+    links: normalizeBugLinks(note.links),
+    issueKey: issueKeyFromText(note.issueKey || ''),
+    images: Array.isArray(note.images)
+      ? note.images.filter((name) => BUG_IMAGE_PATTERN.test(String(name)))
+      : [],
+    state: BUG_STATES.includes(note.state) ? note.state : 'new',
+    jiraKey: issueKeyFromText(note.jiraKey || ''),
+    createdAt,
+    updatedAt:
+      typeof note.updatedAt === 'string' && note.updatedAt ? note.updatedAt : createdAt,
+    createdJiraAt:
+      typeof note.createdJiraAt === 'string' && note.createdJiraAt ? note.createdJiraAt : null,
+  };
+}
+
+function writeBugNote(note) {
+  const dir = bugDir(note.id);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(bugNotePath(note.id), JSON.stringify(note, null, 2), 'utf-8');
+}
+
+function readBugNote(id) {
+  if (!BUG_ID_PATTERN.test(String(id || ''))) throw new Error('Incidencia no valida');
+  const raw = fs.readFileSync(bugNotePath(id), 'utf-8');
+  return normalizeBugNote(JSON.parse(raw));
+}
+
+function listBugs() {
+  let entries;
+  try {
+    entries = fs.readdirSync(bugsRoot(), { withFileTypes: true });
+  } catch (err) {
+    return [];
+  }
+  const items = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory() || !BUG_ID_PATTERN.test(entry.name)) continue;
+    try {
+      items.push(readBugNote(entry.name));
+    } catch (err) {
+      /* una carpeta corrupta no invalida el resto */
+    }
+  }
+  items.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  return items;
+}
+
+function saveBugImage(id, image, index) {
+  const type = image && typeof image.type === 'string' ? image.type.toLowerCase() : '';
+  const extension = IMAGE_EXTENSION_BY_TYPE[type];
+  if (!extension) return '';
+  let bytes = image && image.bytes;
+  // El portapapeles y el selector de archivos llegan como ArrayBuffer: hay que
+  // convertirlos antes de mirar la longitud (.length es undefined alli).
+  if (bytes && !(bytes instanceof Uint8Array)) {
+    try {
+      bytes = new Uint8Array(bytes);
+    } catch (err) {
+      return '';
+    }
+  }
+  if (!bytes || !bytes.length || bytes.length > MAX_BUG_IMAGE_BYTES) return '';
+  const filename = `img-${index}.${extension}`;
+  fs.mkdirSync(bugDir(id), { recursive: true });
+  fs.writeFileSync(path.join(bugDir(id), filename), Buffer.from(bytes));
+  return filename;
+}
+
+function addBugImage(id, image) {
+  const note = readBugNote(id);
+  if (note.images.length >= MAX_BUG_IMAGES) {
+    throw new Error(`Cada incidencia admite como maximo ${MAX_BUG_IMAGES} imagenes`);
+  }
+  let index = note.images.length + 1;
+  while (note.images.includes(`img-${index}.${IMAGE_EXTENSION_BY_TYPE[(image && image.type) || '']}`)) {
+    index += 1;
+  }
+  const filename = saveBugImage(id, image, index);
+  if (!filename) throw new Error('La imagen no es valida o supera los 10 MB');
+  note.images.push(filename);
+  note.updatedAt = new Date().toISOString();
+  writeBugNote(note);
+  return { note, filename };
+}
+
+function removeBugImage(id, filename) {
+  if (!BUG_IMAGE_PATTERN.test(String(filename || ''))) throw new Error('Imagen no valida');
+  const note = readBugNote(id);
+  note.images = note.images.filter((item) => item !== filename);
+  note.updatedAt = new Date().toISOString();
+  writeBugNote(note);
+  try {
+    fs.unlinkSync(path.join(bugDir(id), filename));
+  } catch (err) {
+    /* el archivo ya no existia */
+  }
+  return note;
+}
+
+function readBugImageDataUrl(id, filename) {
+  if (!BUG_ID_PATTERN.test(String(id || '')) || !BUG_IMAGE_PATTERN.test(String(filename || ''))) {
+    throw new Error('Imagen no valida');
+  }
+  const extension = String(filename).split('.').pop();
+  const mime = IMAGE_MIME_BY_EXTENSION[extension];
+  if (!mime) throw new Error('Formato de imagen no soportado');
+  const bytes = fs.readFileSync(path.join(bugDir(id), filename));
+  return `data:${mime};base64,${bytes.toString('base64')}`;
+}
+
+function createBug(payload) {
+  const input = payload || {};
+  const title = String(input.title || '').trim();
+  if (!title) throw new Error('El titulo de la incidencia es obligatorio');
+
+  const now = new Date().toISOString();
+  const note = normalizeBugNote({
+    id: newBugId(),
+    title,
+    details: input.details,
+    links: input.links,
+    issueKey: input.issueKey,
+    state: 'new',
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  fs.mkdirSync(bugDir(note.id), { recursive: true });
+  let failed = 0;
+  const images = Array.isArray(input.images) ? input.images.slice(0, MAX_BUG_IMAGES) : [];
+  images.forEach((image, position) => {
+    const filename = saveBugImage(note.id, image, position + 1);
+    if (filename) note.images.push(filename);
+    else failed += 1;
+  });
+
+  writeBugNote(note);
+  return { note, failed };
+}
+
+function updateBug(id, changes) {
+  const note = readBugNote(id);
+  const patch = changes && typeof changes === 'object' ? changes : {};
+
+  if (patch.title !== undefined) {
+    const title = String(patch.title || '').trim();
+    if (!title) throw new Error('El titulo de la incidencia es obligatorio');
+    note.title = title.slice(0, MAX_BUG_TITLE);
+  }
+  if (patch.details !== undefined) {
+    note.details = String(patch.details || '').slice(0, MAX_BUG_DETAILS);
+  }
+  if (patch.links !== undefined) note.links = normalizeBugLinks(patch.links);
+  if (patch.issueKey !== undefined) note.issueKey = issueKeyFromText(patch.issueKey || '');
+
+  if (patch.state !== undefined) {
+    if (!BUG_STATES.includes(patch.state)) throw new Error('Estado no valido');
+    if (patch.state === 'created') {
+      const jiraKey = issueKeyFromText(patch.jiraKey !== undefined ? patch.jiraKey : note.jiraKey);
+      if (!jiraKey) throw new Error('Escribe la clave de Jira, por ejemplo CLIN-530');
+      note.jiraKey = jiraKey;
+      note.state = 'created';
+      note.createdJiraAt = new Date().toISOString();
+    } else {
+      note.state = patch.state;
+      if (patch.state === 'new') {
+        note.jiraKey = '';
+        note.createdJiraAt = null;
+      }
+    }
+  } else if (patch.jiraKey !== undefined) {
+    note.jiraKey = issueKeyFromText(patch.jiraKey || '');
+  }
+
+  note.updatedAt = new Date().toISOString();
+  writeBugNote(note);
+  return note;
+}
+
+function deleteBug(id) {
+  if (!BUG_ID_PATTERN.test(String(id || ''))) throw new Error('Incidencia no valida');
+  fs.rmSync(bugDir(id), { recursive: true, force: true });
+  return true;
+}
+
+function bugStateLabel(state) {
+  if (state === 'created') return 'Creada';
+  if (state === 'archived') return 'Archivada';
+  return 'Nueva';
+}
+
+function bugLinkLabel(kind) {
+  if (kind === 'slack') return 'Slack';
+  if (kind === 'jira') return 'Jira';
+  if (kind === 'web') return 'Web';
+  return 'Enlace';
+}
+
+function bugImagePaths(note) {
+  return note.images.map((filename) =>
+    path.join(bugDir(note.id), filename).split(path.sep).join('/')
+  );
+}
+
+function bugToMarkdown(note) {
+  const normalized = normalizeBugNote(note);
+  const title = normalized.title.replace(/[\r\n]+/g, ' ').trim() || 'Incidencia';
+  const blocks = [`# ${title}`];
+
+  const meta = [`- Capturada: ${formatDateTime(normalized.createdAt)}`];
+  meta.push(`- Estado: ${bugStateLabel(normalized.state)}`);
+  if (normalized.issueKey) meta.push(`- Issue relacionado: ${normalized.issueKey}`);
+  if (normalized.jiraKey) {
+    const when = normalized.createdJiraAt ? ` · ${formatDateTime(normalized.createdJiraAt)}` : '';
+    meta.push(`- Creada en Jira: ${normalized.jiraKey}${when}`);
+  }
+  blocks.push(meta.join('\n'));
+
+  if (normalized.details.trim()) blocks.push('## Detalles', normalized.details.trim());
+  if (normalized.links.length) {
+    blocks.push(
+      '## Enlaces',
+      normalized.links.map((link) => `- ${bugLinkLabel(link.kind)}: ${link.url}`).join('\n')
+    );
+  }
+  if (normalized.images.length) {
+    blocks.push(
+      '## Imágenes',
+      bugImagePaths(normalized)
+        .map((file) => `- ${file}`)
+        .join('\n')
+    );
+  }
+  return blocks.join('\n\n');
+}
+
+function readBugDraft() {
+  try {
+    const raw = fs.readFileSync(bugDraftPath(), 'utf-8');
+    const draft = JSON.parse(raw);
+    return {
+      title: String((draft && draft.title) || ''),
+      details: String((draft && draft.details) || ''),
+      links: normalizeBugLinks(draft && draft.links),
+      issueKey: String((draft && draft.issueKey) || ''),
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
+function saveBugDraft(draft) {
+  if (!draft || typeof draft !== 'object') return false;
+  const title = String(draft.title || '');
+  const details = String(draft.details || '');
+  const links = normalizeBugLinks(draft.links);
+  const issueKey = String(draft.issueKey || '');
+  if (!title.trim() && !details.trim() && !links.length && !issueKey.trim()) {
+    clearBugDraft();
+    return false;
+  }
+  fs.mkdirSync(bugsRoot(), { recursive: true });
+  fs.writeFileSync(
+    bugDraftPath(),
+    JSON.stringify({ title, details, links, issueKey }, null, 2),
+    'utf-8'
+  );
+  return true;
+}
+
+function clearBugDraft() {
+  try {
+    fs.rmSync(bugDraftPath(), { force: true });
+  } catch (err) {
+    /* sin borrador */
+  }
+}
+
+function clipboardUrl() {
+  try {
+    const text = clipboard.readText().trim();
+    if (!/^https?:\/\/\S+$/i.test(text)) return '';
+    const parsed = new URL(text);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? text : '';
+  } catch (err) {
+    return '';
+  }
+}
+
+function normalizeAccelerator(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const parts = text.split('+').map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 2) return '';
+  const key = parts.pop();
+  const modifiers = [];
+  for (const part of parts) {
+    const name = part.toLowerCase();
+    const modifier = {
+      ctrl: 'Control',
+      control: 'Control',
+      alt: 'Alt',
+      shift: 'Shift',
+      super: 'Super',
+      meta: 'Super',
+      cmd: 'Super',
+      command: 'Super',
+    }[name];
+    if (!modifier || modifiers.includes(modifier)) return '';
+    modifiers.push(modifier);
+  }
+  if (!/^[A-Za-z0-9]{1,10}$/.test(key)) return '';
+  const normalizedKey = /^[A-Za-z]$/.test(key) ? key.toUpperCase() : key;
+  return [...modifiers, normalizedKey].join('+');
+}
+
+function hotkeyLabel(accelerator) {
+  return String(accelerator || '').replace('Control', 'Ctrl');
+}
+
+// El atajo anterior se conserva si el nuevo no se puede registrar: nunca se deja
+// al usuario sin captura por un cambio fallido.
+function applyBugShortcut(accelerator) {
+  const target = normalizeAccelerator(accelerator) || DEFAULT_BUG_HOTKEY;
+  if (!globalShortcut || typeof globalShortcut.register !== 'function') {
+    activeBugHotkey = '';
+    return { ok: true, accelerator: target };
+  }
+  if (
+    activeBugHotkey === target &&
+    typeof globalShortcut.isRegistered === 'function' &&
+    globalShortcut.isRegistered(target)
+  ) {
+    return { ok: true, accelerator: target };
+  }
+
+  const previous = activeBugHotkey;
+  if (previous) {
+    try {
+      globalShortcut.unregister(previous);
+    } catch (err) {
+      /* el atajo ya no estaba registrado */
+    }
+    activeBugHotkey = '';
+  }
+
+  let registered = false;
+  try {
+    registered = globalShortcut.register(target, () => showCaptureWindow());
+  } catch (err) {
+    registered = false;
+  }
+
+  if (registered) {
+    activeBugHotkey = target;
+    return { ok: true, accelerator: target };
+  }
+
+  if (previous) {
+    try {
+      if (globalShortcut.register(previous, () => showCaptureWindow())) {
+        activeBugHotkey = previous;
+      }
+    } catch (err) {
+      /* se queda sin atajo, la bandeja sigue disponible */
+    }
+  }
+  return {
+    ok: false,
+    accelerator: activeBugHotkey,
+    error: `No se pudo registrar ${hotkeyLabel(target)}; puede estar ocupado por otra aplicacion.`,
+  };
+}
+
+function applyAutostart(enabled) {
+  if (!app.isPackaged || typeof app.setLoginItemSettings !== 'function') return false;
+  try {
+    app.setLoginItemSettings({ openAtLogin: !!enabled });
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function showCaptureWindow() {
+  if (!captureWindow || captureWindow.isDestroyed()) {
+    captureWindow = new BrowserWindow({
+      width: 520,
+      height: 620,
+      minWidth: 420,
+      minHeight: 460,
+      frame: false,
+      resizable: true,
+      minimizable: false,
+      maximizable: false,
+      fullscreenable: false,
+      skipTaskbar: true,
+      alwaysOnTop: true,
+      autoHideMenuBar: true,
+      show: false,
+      title: 'Capturar incidencia',
+      backgroundColor: '#ffffff',
+      webPreferences: {
+        preload: path.join(__dirname, 'renderer', 'capture', 'capture-preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+      },
+    });
+    captureWindow.loadFile(path.join(__dirname, 'renderer', 'capture', 'index.html'));
+    captureWindow.on('closed', () => {
+      captureWindow = null;
+    });
+  }
+
+  const wasVisible = captureWindow.isVisible();
+
+  try {
+    const point = screen.getCursorScreenPoint();
+    const area = screen.getDisplayNearestPoint(point).workArea;
+    const [width, height] = captureWindow.getSize();
+    captureWindow.setPosition(
+      Math.round(area.x + (area.width - width) / 2),
+      Math.round(area.y + (area.height - height) / 3)
+    );
+  } catch (err) {
+    /* sin informacion de pantalla, se deja la posicion por defecto */
+  }
+
+  captureWindow.show();
+  captureWindow.focus();
+
+  // Solo se reinicia el formulario al reabrir: pulsar el atajo con la ventana
+  // ya visible no debe borrar lo que el usuario esta escribiendo.
+  if (!wasVisible && captureWindow.webContents && !captureWindow.webContents.isLoading()) {
+    captureWindow.webContents.send('capture:shown');
+  }
+}
+
+function createTray() {
+  if (!Tray || !nativeImage) return;
+  try {
+    const icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.png'));
+    tray = new Tray(icon);
+  } catch (err) {
+    tray = null;
+    return;
+  }
+  tray.setToolTip('NotiJira');
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: 'Capturar incidencia', click: () => showCaptureWindow() },
+      { label: 'Abrir NotiJira', click: () => showMainWindow() },
+      { type: 'separator' },
+      {
+        label: 'Salir',
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        },
+      },
+    ])
+  );
+  tray.on('click', () => showCaptureWindow());
+}
+
 ipcMain.handle('config:get', () => {
   const config = readConfig();
   if (!config) return null;
@@ -888,6 +1475,14 @@ ipcMain.handle('config:get', () => {
     updateUrl: config.updateUrl || '',
     gitlabUrl: config.gitlabUrl || '',
     gitlabToken: config.gitlabToken || '',
+    bugHotkey: config.bugHotkey || DEFAULT_BUG_HOTKEY,
+    bugStartAtLogin: config.bugStartAtLogin === true,
+    bugShortcutActive: Boolean(
+      activeBugHotkey &&
+        globalShortcut &&
+        typeof globalShortcut.isRegistered === 'function' &&
+        globalShortcut.isRegistered(activeBugHotkey)
+    ),
   };
 });
 
@@ -900,7 +1495,30 @@ ipcMain.handle('config:save', (_event, config) => {
     // Una URL invalida no debe descartar la configuracion de Jira ya guardada.
     return { ok: false, error: err.message };
   }
+
+  // Otros flujos de guardado (por ejemplo las credenciales de GitLab) envian un
+  // payload parcial: el atajo y el arranque se conservan cuando no vienen.
+  const stored = readConfig() || {};
+  const explicitHotkey =
+    incoming.bugHotkey !== undefined && String(incoming.bugHotkey).trim()
+      ? String(incoming.bugHotkey).trim()
+      : '';
+  const requestedHotkey = explicitHotkey || stored.bugHotkey || DEFAULT_BUG_HOTKEY;
+  const bugHotkey =
+    normalizeAccelerator(requestedHotkey) || (explicitHotkey ? '' : DEFAULT_BUG_HOTKEY);
+  if (!bugHotkey) {
+    return {
+      ok: false,
+      error: 'El atajo de captura no es valido: usa al menos un modificador y una tecla.',
+    };
+  }
+  const bugStartAtLogin =
+    incoming.bugStartAtLogin !== undefined
+      ? incoming.bugStartAtLogin === true
+      : stored.bugStartAtLogin === true;
+
   try {
+    const shortcut = applyBugShortcut(bugHotkey);
     writeConfig({
       baseUrl: normalizeBaseUrl(incoming.baseUrl),
       email: (incoming.email || '').trim(),
@@ -908,9 +1526,12 @@ ipcMain.handle('config:save', (_event, config) => {
       updateUrl: (incoming.updateUrl || '').trim(),
       gitlabUrl,
       gitlabToken: gitlabUrl ? (incoming.gitlabToken || '').trim() : '',
+      bugHotkey: shortcut.ok ? bugHotkey : activeBugHotkey || bugHotkey,
+      bugStartAtLogin,
     });
     configureUpdater();
-    return { ok: true };
+    applyAutostart(bugStartAtLogin);
+    return shortcut.ok ? { ok: true } : { ok: true, hotkeyError: shortcut.error };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -999,6 +1620,152 @@ ipcMain.handle('copy:issue', async (_event, payload) => {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+});
+
+ipcMain.handle('bugs:list', () => {
+  try {
+    return { ok: true, items: listBugs() };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:create', (_event, payload) => {
+  try {
+    const { note, failed } = createBug(payload);
+    return { ok: true, item: note, failed };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:update', (_event, payload) => {
+  try {
+    const note = updateBug(payload && payload.id, payload && payload.changes);
+    return { ok: true, item: note };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:delete', (_event, payload) => {
+  try {
+    deleteBug(payload && payload.id);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:image:add', (_event, payload) => {
+  try {
+    const { note } = addBugImage(payload && payload.id, payload && payload.image);
+    return { ok: true, item: note };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:image:read', (_event, payload) => {
+  try {
+    const dataUrl = readBugImageDataUrl(payload && payload.id, payload && payload.filename);
+    return { ok: true, dataUrl };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:image:delete', (_event, payload) => {
+  try {
+    const note = removeBugImage(payload && payload.id, payload && payload.filename);
+    return { ok: true, item: note };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:markdown', (_event, payload) => {
+  try {
+    const note = readBugNote(payload && payload.id);
+    return { ok: true, markdown: bugToMarkdown(note) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:copyMarkdown', (_event, payload) => {
+  try {
+    const note = readBugNote(payload && payload.id);
+    const markdown = bugToMarkdown(note);
+    clipboard.writeText(markdown);
+    return { ok: true, chars: markdown.length };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:copyImagePaths', (_event, payload) => {
+  try {
+    const note = readBugNote(payload && payload.id);
+    if (!note.images.length) throw new Error('La incidencia no tiene imagenes');
+    clipboard.writeText(bugImagePaths(note).join('\n'));
+    return { ok: true, count: note.images.length };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:openFolder', async (_event, payload) => {
+  try {
+    const id = payload && payload.id;
+    if (!BUG_ID_PATTERN.test(String(id || ''))) throw new Error('Incidencia no valida');
+    fs.mkdirSync(bugDir(id), { recursive: true });
+    await shell.openPath(bugDir(id));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:openCapture', () => {
+  showCaptureWindow();
+  return { ok: true };
+});
+
+ipcMain.handle('bugs:close', () => {
+  if (captureWindow && !captureWindow.isDestroyed()) captureWindow.hide();
+  return { ok: true };
+});
+
+ipcMain.handle('bugs:context', () => {
+  return {
+    ok: true,
+    issueKey: lastIssueKey,
+    clipboardUrl: clipboardUrl(),
+  };
+});
+
+ipcMain.handle('bugs:draft:get', () => {
+  return { ok: true, draft: readBugDraft() };
+});
+
+ipcMain.handle('bugs:draft:save', (_event, draft) => {
+  try {
+    return { ok: true, saved: saveBugDraft(draft) };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('bugs:draft:clear', () => {
+  clearBugDraft();
+  return { ok: true };
+});
+
+ipcMain.handle('clipboard:writeText', (_event, text) => {
+  if (typeof text !== 'string') return false;
+  clipboard.writeText(text);
+  return true;
 });
 
 ipcMain.handle('shell:openExternal', async (_event, url) => {
@@ -1102,20 +1869,53 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+
+  // Con bandeja activa, cerrar la ventana la oculta: el atajo de captura debe
+  // seguir disponible aunque no haya ventana principal a la vista.
+  mainWindow.on('close', (event) => {
+    if (isQuitting || !tray) return;
+    event.preventDefault();
+    mainWindow.hide();
+  });
+}
+
+const hasSingleInstanceLock =
+  typeof app.requestSingleInstanceLock === 'function'
+    ? app.requestSingleInstanceLock()
+    : true;
+
+if (!hasSingleInstanceLock) {
+  app.quit();
+} else if (typeof app.on === 'function') {
+  app.on('second-instance', () => showMainWindow());
 }
 
 app.whenReady().then(() => {
   if (process.platform === 'win32') {
     app.setAppUserModelId('com.notijira.app');
   }
+  const config = readConfig();
+  applyBugShortcut((config && config.bugHotkey) || DEFAULT_BUG_HOTKEY);
   createWindow();
   setupUpdater();
+  createTray();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
 
+app.on('before-quit', () => {
+  isQuitting = true;
+});
+
+app.on('will-quit', () => {
+  if (globalShortcut && typeof globalShortcut.unregisterAll === 'function') {
+    globalShortcut.unregisterAll();
+  }
+});
+
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  // La bandeja mantiene viva la aplicacion para que el atajo siga funcionando.
+  if (process.platform !== 'darwin' && !tray) app.quit();
 });
