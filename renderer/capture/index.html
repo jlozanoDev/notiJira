@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:;"
+    />
+    <title>Capturar incidencia</title>
+    <link rel="stylesheet" href="capture.css" />
+  </head>
+  <body>
+    <header class="capture-header">
+      <span class="capture-title">Capturar incidencia</span>
+      <button id="closeBtn" class="icon-btn" type="button" title="Cerrar y guardar borrador">
+        ✕
+      </button>
+    </header>
+
+    <main class="capture-body">
+      <div class="field">
+        <label for="titleInput">Titulo</label>
+        <input id="titleInput" type="text" maxlength="300" autocomplete="off" spellcheck="false" />
+        <p id="titleError" class="field-error hidden">Escribe un titulo para guardar.</p>
+      </div>
+
+      <div class="field">
+        <label for="detailsInput">Detalles</label>
+        <textarea id="detailsInput" rows="3" placeholder="Pasos, resultado esperado, lo que sea util"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="linkInput">Enlaces</label>
+        <div class="link-row">
+          <input id="linkInput" type="text" placeholder="Pega una URL de Slack, Jira o web" autocomplete="off" />
+          <button id="addLinkBtn" class="secondary-btn" type="button">Anadir</button>
+        </div>
+        <div id="linkChips" class="chip-list"></div>
+        <p id="linkError" class="field-error hidden"></p>
+      </div>
+
+      <div class="field">
+        <label for="issueInput">Issue relacionado</label>
+        <input id="issueInput" type="text" placeholder="CLIN-530 o una URL de Jira" autocomplete="off" spellcheck="false" />
+      </div>
+
+      <div class="field">
+        <div class="field-head">
+          <label for="imageInput">Imagenes</label>
+          <span id="imageHint" class="hint">Pega con Ctrl+V o suelta archivos</span>
+        </div>
+        <div id="dropZone" class="drop-zone">
+          <div id="imageStrip" class="image-strip"></div>
+          <p id="dropHint" class="drop-hint">Arrastra imagenes aqui</p>
+        </div>
+        <input id="imageInput" type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden />
+        <p id="imageError" class="field-error hidden"></p>
+      </div>
+    </main>
+
+    <footer class="capture-footer">
+      <span id="statusText" class="status-text">Enter guarda · Ctrl+Enter guarda · Esc cierra</span>
+      <div class="footer-actions">
+        <button id="cancelBtn" class="secondary-btn" type="button">Cerrar</button>
+        <button id="saveBtn" class="primary-btn" type="button">Guardar</button>
+      </div>
+    </footer>
+
+    <script src="capture.js"></script>
+  </body>
+</html>

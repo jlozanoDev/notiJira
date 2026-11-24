@@ -1,7 +1,7 @@
 'use strict';
-// Minimal DOM/IPC harness so the real renderer/renderer.js can be driven
-// headlessly. It only stubs what the copy flow touches: element lookups,
-// classList, listeners and window.api.
+// Minimal DOM/IPC harness so the real renderer scripts (renderer/renderer.js and
+// renderer/capture/capture.js) can be driven headlessly. It only stubs what the
+// flows touch: element lookups, classList, listeners and window.api.
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
@@ -12,6 +12,9 @@ const INITIALLY_HIDDEN = new Set([
   'modal',
   'searchModal',
   'copyModal',
+  'bugsModal',
+  'bugDetailBody',
+  'bugCreatedInfo',
   'gitlabSelection',
   'copyAttachmentsNote',
   'searchResults',
@@ -24,7 +27,6 @@ function makeElement(id, tag) {
     tagName: (tag || 'div').toUpperCase(),
     type: '',
     value: '',
-    textContent: '',
     className: '',
     checked: false,
     disabled: false,
@@ -67,10 +69,22 @@ function makeElement(id, tag) {
     },
   });
 
+  // Igual que en el DOM real: vaciar el texto vacia los hijos. Sin esto las
+  // listas acumulan filas entre renderizados.
+  Object.defineProperty(el, 'textContent', {
+    get: () => el._text,
+    set: (value) => {
+      el._text = value;
+      if (value === '') el.children = [];
+    },
+  });
+  el._text = '';
+
   el.appendChild = (child) => {
     el.children.push(child);
     return child;
   };
+  el.append = (...nodes) => nodes.forEach((node) => el.children.push(node));
   el.addEventListener = (type, handler) => {
     (el.listeners[type] = el.listeners[type] || []).push(handler);
   };
@@ -80,6 +94,9 @@ function makeElement(id, tag) {
     return queued.length;
   };
   el.focus = () => {};
+  el.select = () => {};
+  el.closest = () => null;
+  el.click = () => el.dispatch('click', { preventDefault: () => {}, target: el });
   el.setAttribute = (name, value) => {
     el[name] = String(value);
   };
@@ -126,6 +143,7 @@ function createClock() {
 // Mirrors preload.js; every entry is recorded so tests can assert on calls.
 function createHarness(options = {}) {
   const clock = createClock();
+  const shownHandlers = [];
   const apiResults = Object.assign(
     {
       getConfig: { baseUrl: 'https://jira.example', apiToken: 'jira-token' },
@@ -160,6 +178,30 @@ function createHarness(options = {}) {
       copyIssue: { ok: true, sections: 1, comments: 0, attachments: 0, folder: '' },
       openExternal: true,
       notify: true,
+
+      // Bandeja de incidencias: mismos nombres que preload.js.
+      listBugs: { ok: true, items: [] },
+      createBug: { ok: true, item: null, failed: 0 },
+      updateBug: { ok: true, item: null },
+      deleteBug: { ok: true },
+      addBugImage: { ok: true, item: null },
+      readBugImage: { ok: false, error: 'sin imagen' },
+      deleteBugImage: { ok: true, item: null },
+      getBugMarkdown: { ok: true, markdown: '' },
+      copyBugMarkdown: { ok: true, chars: 0 },
+      copyBugImagePaths: { ok: true, count: 0 },
+      openBugFolder: { ok: true },
+      openBugCapture: { ok: true },
+      closeBugCapture: { ok: true },
+      getBugContext: { ok: true, issueKey: '', clipboardUrl: '' },
+      getBugDraft: { ok: true, draft: null },
+      saveBugDraft: { ok: true, saved: false },
+      clearBugDraft: { ok: true },
+      writeClipboard: true,
+      onShown: (handler) => {
+        shownHandlers.push(handler);
+        return Promise.resolve(true);
+      },
     },
     options.apiResults || {}
   );
@@ -175,6 +217,7 @@ function createHarness(options = {}) {
     };
   }
 
+  const documentListeners = {};
   const document = {
     getElementById: (id) => {
       if (!elements.has(id)) elements.set(id, makeElement(id));
@@ -182,6 +225,18 @@ function createHarness(options = {}) {
     },
     createElement: (tag) => makeElement('', tag),
     querySelectorAll: () => [],
+    addEventListener: (type, handler) => {
+      (documentListeners[type] = documentListeners[type] || []).push(handler);
+    },
+    dispatch: async (type, event) => {
+      const queued = documentListeners[type] || [];
+      const detail = Object.assign({ preventDefault: () => {}, target: null }, event || {});
+      for (const handler of queued) {
+        await handler(detail);
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return queued.length;
+    },
   };
   const storage = new Map();
   const localStorage = {
@@ -203,7 +258,13 @@ function createHarness(options = {}) {
     Math,
     Set,
     Map,
-    URL,
+    // La ventana de captura crea object URLs para las miniaturas.
+    URL: class StubURL extends URL {
+      static createObjectURL() {
+        return 'blob:stub';
+      }
+      static revokeObjectURL() {}
+    },
     String,
     Number,
     Object,
@@ -212,12 +273,21 @@ function createHarness(options = {}) {
     Error,
     RegExp,
   };
-  context.window = { api, AudioContext: undefined, webkitAudioContext: undefined };
-
   const source = fs.readFileSync(
-    path.join(__dirname, '..', '..', 'renderer', 'renderer.js'),
+    path.join(__dirname, '..', '..', options.sourceFile || path.join('renderer', 'renderer.js')),
     'utf8'
   );
+
+  const windowListeners = {};
+  context.window = {
+    api,
+    AudioContext: undefined,
+    webkitAudioContext: undefined,
+    addEventListener: (type, handler) => {
+      (windowListeners[type] = windowListeners[type] || []).push(handler);
+    },
+  };
+
   vm.runInNewContext(source, context, { filename: 'renderer.js' });
 
   return {
@@ -227,6 +297,22 @@ function createHarness(options = {}) {
     advance: clock.advance,
     el: (id) => document.getElementById(id),
     isHidden: (id) => document.getElementById(id).classList.contains('hidden'),
+    async dispatchWindow(type) {
+      const queued = windowListeners[type] || [];
+      for (const handler of queued) {
+        await handler({ type });
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return queued.length;
+    },
+    document,
+    async fireCaptureShown() {
+      for (const handler of shownHandlers) {
+        await handler();
+        await new Promise((resolve) => setImmediate(resolve));
+      }
+      return shownHandlers.length;
+    },
   };
 }
 

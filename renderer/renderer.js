@@ -46,6 +46,47 @@ const els = {
   copyMessage: document.getElementById('copyMessage'),
   copyCancelBtn: document.getElementById('copyCancelBtn'),
   copyDoBtn: document.getElementById('copyDoBtn'),
+
+  // Bandeja de incidencias
+  bugsBtn: document.getElementById('bugsBtn'),
+  bugsCount: document.getElementById('bugsCount'),
+  bugsModal: document.getElementById('bugsModal'),
+  bugNewBtn: document.getElementById('bugNewBtn'),
+  bugsCloseBtn: document.getElementById('bugsCloseBtn'),
+  bugSearch: document.getElementById('bugSearch'),
+  bugList: document.getElementById('bugList'),
+  bugEmpty: document.getElementById('bugEmpty'),
+  bugDetailBody: document.getElementById('bugDetailBody'),
+  bugTitleInput: document.getElementById('bugTitleInput'),
+  bugDetailsInput: document.getElementById('bugDetailsInput'),
+  bugLinkInput: document.getElementById('bugLinkInput'),
+  bugAddLinkBtn: document.getElementById('bugAddLinkBtn'),
+  bugLinkChips: document.getElementById('bugLinkChips'),
+  bugIssueInput: document.getElementById('bugIssueInput'),
+  bugAddImageBtn: document.getElementById('bugAddImageBtn'),
+  bugImageInput: document.getElementById('bugImageInput'),
+  bugImages: document.getElementById('bugImages'),
+  bugImagesEmpty: document.getElementById('bugImagesEmpty'),
+  bugCreatedRow: document.getElementById('bugCreatedRow'),
+  bugJiraKeyInput: document.getElementById('bugJiraKeyInput'),
+  bugMarkCreatedBtn: document.getElementById('bugMarkCreatedBtn'),
+  bugCreatedInfo: document.getElementById('bugCreatedInfo'),
+  bugMeta: document.getElementById('bugMeta'),
+  bugSaveBtn: document.getElementById('bugSaveBtn'),
+  bugCopyMdBtn: document.getElementById('bugCopyMdBtn'),
+  bugCopyPathsBtn: document.getElementById('bugCopyPathsBtn'),
+  bugOpenFolderBtn: document.getElementById('bugOpenFolderBtn'),
+  bugArchiveBtn: document.getElementById('bugArchiveBtn'),
+  bugDeleteBtn: document.getElementById('bugDeleteBtn'),
+  bugMessage: document.getElementById('bugMessage'),
+  bugTabPending: document.getElementById('bugTabPending'),
+  bugTabCreated: document.getElementById('bugTabCreated'),
+  bugTabAll: document.getElementById('bugTabAll'),
+  bugCountPending: document.getElementById('bugCountPending'),
+  bugCountCreated: document.getElementById('bugCountCreated'),
+  bugCountAll: document.getElementById('bugCountAll'),
+  bugHotkey: document.getElementById('bugHotkey'),
+  bugStartAtLogin: document.getElementById('bugStartAtLogin'),
 };
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
@@ -76,6 +117,13 @@ const state = {
   selectedComments: new Set(),
   returnToCopyModal: false,
   gitlabSession: 0,
+  bugs: [],
+  bugFilter: 'pending',
+  bugSearch: '',
+  bugSelectedId: null,
+  bugLinks: [],
+  bugDeleteArmed: false,
+  bugSettingsLoaded: false,
 };
 
 function normalizeBaseUrl(url) {
@@ -85,8 +133,64 @@ function normalizeBaseUrl(url) {
   return base;
 }
 
+// El atajo se muestra con etiquetas cortas y se envia en la forma que espera
+// globalShortcut; main.js aplica las mismas reglas de normalizacion.
+const DEFAULT_BUG_HOTKEY = 'Control+Alt+J';
+const HOTKEY_KEY_PATTERN = /^[A-Za-z0-9]{1,10}$/;
+
+function normalizeAccelerator(value) {
+  const parts = String(value || '')
+    .split('+')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  if (parts.length < 2) return '';
+  const key = parts.pop();
+  if (!HOTKEY_KEY_PATTERN.test(key)) return '';
+  const modifiers = [];
+  for (const part of parts) {
+    const modifier =
+      {
+        ctrl: 'Control',
+        control: 'Control',
+        alt: 'Alt',
+        shift: 'Shift',
+        super: 'Super',
+        meta: 'Super',
+        cmd: 'Super',
+        command: 'Super',
+        win: 'Super',
+        windows: 'Super',
+      }[part.toLowerCase()] || '';
+    if (!modifier || modifiers.includes(modifier)) return '';
+    modifiers.push(modifier);
+  }
+  if (!modifiers.length) return '';
+  const normalizedKey = /^[A-Za-z]$/.test(key) ? key.toUpperCase() : key;
+  return [...modifiers, normalizedKey].join('+');
+}
+
+function hotkeyLabel(accelerator) {
+  return String(accelerator || '')
+    .split('+')
+    .map((part) => (part === 'Control' ? 'Ctrl' : part === 'Super' ? 'Win' : part))
+    .join('+');
+}
+
+function acceleratorFromEvent(event) {
+  const modifiers = [];
+  if (event.ctrlKey || event.metaKey) modifiers.push('Control');
+  if (event.altKey) modifiers.push('Alt');
+  if (event.shiftKey) modifiers.push('Shift');
+  const code = String(event.code || '');
+  let key = '';
+  if (/^Key[A-Z]$/.test(code)) key = code.slice(3);
+  else if (/^Digit\d$/.test(code)) key = code.slice(5);
+  else if (/^F([1-9]|1\d|2[0-4])$/.test(code)) key = code;
+  return { modifiers, key };
+}
+
 function currentFormConfig() {
-  return {
+  const config = {
     baseUrl: normalizeBaseUrl(els.baseUrl.value),
     email: els.email.value.trim(),
     apiToken: els.apiToken.value.trim(),
@@ -94,6 +198,13 @@ function currentFormConfig() {
     gitlabUrl: els.gitlabUrl.value.trim(),
     gitlabToken: els.gitlabToken.value.trim(),
   };
+  // Sin el formulario cargado no se sabe si los campos reflejan lo guardado:
+  // se omite la clave y main.js conserva la almacenada.
+  if (state.bugSettingsLoaded) {
+    config.bugHotkey = normalizeAccelerator(els.bugHotkey.value) || DEFAULT_BUG_HOTKEY;
+    config.bugStartAtLogin = els.bugStartAtLogin.checked;
+  }
+  return config;
 }
 
 function setStatus(message, type) {
@@ -469,7 +580,13 @@ function openModal() {
     els.updateUrl.value = state.config.updateUrl || '';
     els.gitlabUrl.value = state.config.gitlabUrl || '';
     els.gitlabToken.value = state.config.gitlabToken || '';
+    applyBugConfigToForm(state.config);
   }
+  // El formulario se muestra completo desde la primera vez: si no hay config
+  // almacenada se pintan los valores por defecto y el atajo capturado se envia
+  // (sin esto, en una instalacion nueva se perdia lo que el usuario eligio).
+  if (!state.config) applyBugConfigToForm(null);
+  state.bugSettingsLoaded = true;
   els.modal.classList.remove('hidden');
   els.baseUrl.focus();
 }
@@ -508,7 +625,10 @@ function showNotConfigured() {
   els.searchBtn.disabled = true;
 }
 
+// Las pestanas de la modal de incidencias reutilizan la clase filter-tab: se
+// descarta cualquier ficha sin data-filter para no pisar state.filter.
 document.querySelectorAll('.filter-tab').forEach((tab) => {
+  if (!tab.dataset.filter) return;
   tab.addEventListener('click', () => {
     state.filter = tab.dataset.filter;
     renderCards();
@@ -557,8 +677,15 @@ els.configForm.addEventListener('submit', async (e) => {
   }
   state.config = (await window.api.getConfig()) || config;
   state.seenIds = null;
-  const resumed = restoreCopyModalAfterGitlabSetup();
-  if (!resumed) closeModal();
+  if (result.hotkeyError) {
+    // El resto de ajustes si se guardo: se muestra el atajo que sigue activo y
+    // la modal queda abierta para probar otra combinacion.
+    applyBugConfigToForm(state.config);
+    setFormMessage(result.hotkeyError, 'error');
+  } else {
+    const resumed = restoreCopyModalAfterGitlabSetup();
+    if (!resumed) closeModal();
+  }
   els.refreshBtn.disabled = false;
   await connectAndLoad();
 });
@@ -1418,8 +1545,544 @@ els.copyDoBtn.addEventListener('click', async () => {
   setStatus(`Copiado al portapapeles: ${parts.join(', ')}.${extra}`, 'ok');
 });
 
+// ---------------------------------------------------------------------------
+// Bandeja de incidencias
+// ---------------------------------------------------------------------------
+
+const BUG_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+const BUG_MAX_IMAGES = 20;
+const BUG_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+const BUG_MAX_LINKS = 10;
+const BUG_LINK_LABELS = { slack: 'Slack', jira: 'Jira', web: 'Web', otro: 'Enlace' };
+const HOTKEY_PROMPT = 'Pulsa una combinacion...';
+
+function setBugMessage(message, type) {
+  els.bugMessage.textContent = message || '';
+  els.bugMessage.className = 'form-message ' + (type || '');
+}
+
+function activeBugHotkeyLabel() {
+  return hotkeyLabel((state.config && state.config.bugHotkey) || DEFAULT_BUG_HOTKEY);
+}
+
+function applyBugConfigToForm(config) {
+  els.bugHotkey.value = hotkeyLabel((config && config.bugHotkey) || DEFAULT_BUG_HOTKEY);
+  els.bugStartAtLogin.checked = Boolean(config && config.bugStartAtLogin);
+}
+
+// El campo es de solo lectura: la combinacion se captura pulsandola, no
+// escribiendola, para no guardar texto que globalShortcut no acepta.
+els.bugHotkey.addEventListener('focus', () => {
+  els.bugHotkey.dataset.previous = els.bugHotkey.value;
+  els.bugHotkey.value = HOTKEY_PROMPT;
+});
+
+els.bugHotkey.addEventListener('blur', () => {
+  if (els.bugHotkey.value !== HOTKEY_PROMPT) return;
+  els.bugHotkey.value = els.bugHotkey.dataset.previous || hotkeyLabel(DEFAULT_BUG_HOTKEY);
+});
+
+els.bugHotkey.addEventListener('keydown', (event) => {
+  event.preventDefault();
+  if (event.key === 'Escape') {
+    els.bugHotkey.value = hotkeyLabel(DEFAULT_BUG_HOTKEY);
+    setFormMessage('', '');
+    return;
+  }
+  if (['Control', 'Alt', 'Shift', 'Meta'].indexOf(event.key) !== -1) return;
+  const parsed = acceleratorFromEvent(event);
+  const accelerator = normalizeAccelerator(
+    parsed.modifiers.concat(parsed.key).join('+')
+  );
+  if (!accelerator) {
+    setFormMessage('Combina Ctrl, Alt o Shift con una letra, un digito o una tecla F.', 'error');
+    return;
+  }
+  els.bugHotkey.value = hotkeyLabel(accelerator);
+  setFormMessage('', '');
+});
+
+function findBug(id) {
+  for (const item of state.bugs) {
+    if (item.id === id) return item;
+  }
+  return null;
+}
+
+function replaceBug(item) {
+  if (!item || !item.id) return;
+  for (let index = 0; index < state.bugs.length; index++) {
+    if (state.bugs[index].id === item.id) {
+      state.bugs[index] = item;
+      return;
+    }
+  }
+  state.bugs.unshift(item);
+}
+
+function bugMatchesFilter(item, filter) {
+  if (filter === 'pending') return item.state === 'new';
+  if (filter === 'created') return item.state === 'created';
+  return true;
+}
+
+function visibleBugs() {
+  const term = state.bugSearch.trim().toLowerCase();
+  return state.bugs.filter((item) => {
+    if (!bugMatchesFilter(item, state.bugFilter)) return false;
+    if (!term) return true;
+    const haystack = [item.title, item.details, item.issueKey, item.jiraKey]
+      .concat((item.links || []).map((link) => link.url))
+      .join(' ')
+      .toLowerCase();
+    return haystack.indexOf(term) !== -1;
+  });
+}
+
+function updateBugBadge() {
+  let pending = 0;
+  let created = 0;
+  for (const item of state.bugs) {
+    if (item.state === 'new') pending += 1;
+    else if (item.state === 'created') created += 1;
+  }
+  els.bugCountPending.textContent = String(pending);
+  els.bugCountCreated.textContent = String(created);
+  els.bugCountAll.textContent = String(state.bugs.length);
+  els.bugsCount.textContent = String(pending);
+  els.bugsCount.classList.toggle('hidden', pending === 0);
+}
+
+function bugStatusLabel(value) {
+  if (value === 'created') return 'Creada';
+  if (value === 'archived') return 'Archivada';
+  return 'Nueva';
+}
+
+function bugRow(item) {
+  const li = document.createElement('li');
+  li.className = 'bug-item' + (item.id === state.bugSelectedId ? ' active' : '');
+
+  const title = document.createElement('span');
+  title.className = 'bug-item-title';
+  title.textContent = item.title;
+  li.appendChild(title);
+
+  const meta = document.createElement('span');
+  meta.className = 'bug-item-meta';
+
+  const badge = document.createElement('span');
+  badge.className = 'bug-state bug-state-' + item.state;
+  badge.textContent = bugStatusLabel(item.state);
+  meta.appendChild(badge);
+
+  if (item.jiraKey) {
+    const key = document.createElement('span');
+    key.textContent = item.jiraKey;
+    meta.appendChild(key);
+  }
+
+  const when = document.createElement('span');
+  when.textContent = formatDate(item.createdAt);
+  meta.appendChild(when);
+
+  if ((item.images || []).length) {
+    const count = document.createElement('span');
+    count.textContent = item.images.length + ' img';
+    meta.appendChild(count);
+  }
+
+  li.appendChild(meta);
+  li.addEventListener('click', () => selectBug(item.id));
+  return li;
+}
+
+function renderBugList() {
+  updateBugBadge();
+  els.bugList.textContent = '';
+  const items = visibleBugs();
+  if (!items.length) {
+    const li = document.createElement('li');
+    li.className = 'bug-list-empty';
+    li.textContent = state.bugs.length
+      ? 'Ninguna incidencia coincide con el filtro.'
+      : 'Sin incidencias. Pulsa ' + activeBugHotkeyLabel() + ' desde cualquier aplicacion.';
+    els.bugList.appendChild(li);
+    return;
+  }
+  for (const item of items) els.bugList.appendChild(bugRow(item));
+}
+
+function bugLinkKind(url) {
+  const text = String(url || '').trim();
+  if (!/^https?:\/\//i.test(text)) return 'otro';
+  if (/\.slack\.com\/archives\//i.test(text)) return 'slack';
+  if (/\/browse\/[A-Za-z][A-Za-z0-9_]*-\d+/i.test(text)) return 'jira';
+  return 'web';
+}
+
+function renderBugLinks() {
+  els.bugLinkChips.textContent = '';
+  for (const link of state.bugLinks) {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+
+    const kind = document.createElement('span');
+    kind.className = 'chip-kind';
+    kind.textContent = BUG_LINK_LABELS[link.kind] || 'Enlace';
+    chip.appendChild(kind);
+
+    const url = document.createElement('button');
+    url.type = 'button';
+    url.className = 'chip-url';
+    url.textContent = link.url;
+    if (/^https?:\/\//i.test(link.url)) {
+      url.title = 'Abrir en el navegador';
+      url.addEventListener('click', () => window.api.openExternal(link.url));
+    }
+    chip.appendChild(url);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'chip-remove';
+    remove.textContent = '✕';
+    remove.title = 'Quitar enlace';
+    remove.addEventListener('click', () => {
+      state.bugLinks = state.bugLinks.filter((entry) => entry.url !== link.url);
+      renderBugLinks();
+    });
+    chip.appendChild(remove);
+
+    els.bugLinkChips.appendChild(chip);
+  }
+}
+
+async function renderBugImages(item) {
+  const images = item.images || [];
+  els.bugImages.textContent = '';
+  els.bugImagesEmpty.textContent = images.length ? '' : 'Sin imagenes.';
+  els.bugImagesEmpty.classList.toggle('hidden', images.length > 0);
+  els.bugAddImageBtn.disabled = images.length >= BUG_MAX_IMAGES;
+
+  for (const filename of images) {
+    const thumb = document.createElement('div');
+    thumb.className = 'thumb';
+    thumb.title = filename;
+
+    const img = document.createElement('img');
+    img.alt = filename;
+    const loaded = await window.api.readBugImage(item.id, filename);
+    if (loaded && loaded.ok) img.src = loaded.dataUrl;
+    thumb.appendChild(img);
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'thumb-remove';
+    remove.textContent = '✕';
+    remove.title = 'Quitar imagen';
+    remove.addEventListener('click', async () => {
+      const result = await window.api.deleteBugImage(item.id, filename);
+      if (!result || !result.ok) {
+        setBugMessage('Error: ' + ((result && result.error) || 'desconocido'), 'error');
+        return;
+      }
+      replaceBug(result.item);
+      renderBugList();
+      await renderBugImages(result.item);
+      setBugMessage('Imagen eliminada.', 'ok');
+    });
+    thumb.appendChild(remove);
+
+    els.bugImages.appendChild(thumb);
+  }
+}
+
+function bugWebUrl(key) {
+  if (!key || !state.config || !state.config.baseUrl) return '';
+  return normalizeBaseUrl(state.config.baseUrl) + '/browse/' + key;
+}
+
+function renderBugFooter(item) {
+  const created = item.state === 'created';
+  const archived = item.state === 'archived';
+
+  els.bugCreatedRow.classList.toggle('hidden', created || archived);
+  els.bugMeta.textContent =
+    'Capturada ' +
+    (formatDate(item.createdAt) || 'sin fecha') +
+    (item.issueKey ? ' · Issue ' + item.issueKey : '') +
+    ' · ' +
+    item.id;
+  els.bugArchiveBtn.textContent = archived ? 'Restaurar' : 'Archivar';
+  els.bugDeleteBtn.textContent = state.bugDeleteArmed ? 'Confirmar eliminacion' : 'Eliminar';
+
+  els.bugCreatedInfo.textContent = '';
+  els.bugCreatedInfo.classList.toggle('hidden', !created);
+  if (!created) return;
+
+  const label = document.createElement('span');
+  label.textContent =
+    'Creada' + (item.createdJiraAt ? ' el ' + formatDate(item.createdJiraAt) : '') + ':';
+  els.bugCreatedInfo.appendChild(label);
+
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'chip-url';
+  link.textContent = item.jiraKey;
+  const url = bugWebUrl(item.jiraKey);
+  if (url) {
+    link.title = 'Abrir en Jira';
+    link.addEventListener('click', () => window.api.openExternal(url));
+  }
+  els.bugCreatedInfo.appendChild(link);
+
+  const reopen = document.createElement('button');
+  reopen.type = 'button';
+  reopen.className = 'btn btn-ghost';
+  reopen.textContent = 'Reabrir';
+  reopen.addEventListener('click', () =>
+    patchBug(item.id, { state: 'new' }, 'Incidencia reabierta.')
+  );
+  els.bugCreatedInfo.appendChild(reopen);
+}
+
+async function selectBug(id) {
+  state.bugSelectedId = id;
+  state.bugDeleteArmed = false;
+  const item = findBug(id);
+  renderBugList();
+  if (!item) return;
+
+  els.bugEmpty.classList.add('hidden');
+  els.bugDetailBody.classList.remove('hidden');
+  els.bugTitleInput.value = item.title || '';
+  els.bugDetailsInput.value = item.details || '';
+  els.bugIssueInput.value = item.issueKey || '';
+  els.bugJiraKeyInput.value = item.jiraKey || '';
+  state.bugLinks = (item.links || []).map((link) => ({ url: link.url, kind: link.kind }));
+  renderBugLinks();
+  renderBugFooter(item);
+  setBugMessage('');
+  await renderBugImages(item);
+}
+
+function showNoBugSelected(message) {
+  state.bugSelectedId = null;
+  state.bugDeleteArmed = false;
+  els.bugDetailBody.classList.add('hidden');
+  els.bugEmpty.classList.remove('hidden');
+  els.bugEmpty.textContent = message || 'Selecciona una incidencia.';
+}
+
+async function patchBug(id, changes, successMessage) {
+  if (!id) return null;
+  const result = await window.api.updateBug(id, changes);
+  if (!result || !result.ok) {
+    setBugMessage('Error: ' + ((result && result.error) || 'desconocido'), 'error');
+    return null;
+  }
+  replaceBug(result.item);
+  renderBugList();
+  if (result.item.id === state.bugSelectedId) renderBugFooter(result.item);
+  if (successMessage) setBugMessage(successMessage, 'ok');
+  return result.item;
+}
+
+async function loadBugs() {
+  const result = await window.api.listBugs();
+  if (!result || !result.ok) {
+    updateBugBadge();
+    if (result && result.error) setBugMessage('Error: ' + result.error, 'error');
+    return;
+  }
+  state.bugs = result.items || [];
+  renderBugList();
+  if (state.bugSelectedId && !findBug(state.bugSelectedId)) showNoBugSelected();
+}
+
+function openBugsModal() {
+  els.bugsModal.classList.remove('hidden');
+  loadBugs();
+  if (!state.bugSelectedId) showNoBugSelected();
+}
+
+function closeBugsModal() {
+  els.bugsModal.classList.add('hidden');
+}
+
+function addBugLinkFromInput() {
+  const text = els.bugLinkInput.value.trim();
+  if (!text) return;
+  els.bugLinkInput.value = '';
+  if (state.bugLinks.some((link) => link.url === text)) return;
+  if (state.bugLinks.length >= BUG_MAX_LINKS) {
+    setBugMessage('Cada incidencia admite como maximo ' + BUG_MAX_LINKS + ' enlaces.', 'error');
+    return;
+  }
+  state.bugLinks.push({ url: text, kind: bugLinkKind(text) });
+  renderBugLinks();
+  setBugMessage('Pulsa "Guardar cambios" para conservar el enlace.', '');
+}
+
+els.bugsBtn.addEventListener('click', openBugsModal);
+els.bugsCloseBtn.addEventListener('click', closeBugsModal);
+els.bugsModal.addEventListener('click', (event) => {
+  if (event.target === els.bugsModal) closeBugsModal();
+});
+els.bugNewBtn.addEventListener('click', () => window.api.openBugCapture());
+els.bugSearch.addEventListener('input', () => {
+  state.bugSearch = els.bugSearch.value;
+  renderBugList();
+});
+els.bugAddLinkBtn.addEventListener('click', addBugLinkFromInput);
+els.bugLinkInput.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    addBugLinkFromInput();
+  }
+});
+els.bugSaveBtn.addEventListener('click', async () => {
+  const item = await patchBug(
+    state.bugSelectedId,
+    {
+      title: els.bugTitleInput.value,
+      details: els.bugDetailsInput.value,
+      links: state.bugLinks,
+      issueKey: els.bugIssueInput.value,
+    },
+    'Cambios guardados.'
+  );
+  if (!item) return;
+  els.bugTitleInput.value = item.title;
+  els.bugIssueInput.value = item.issueKey;
+});
+els.bugMarkCreatedBtn.addEventListener('click', () => {
+  patchBug(
+    state.bugSelectedId,
+    { state: 'created', jiraKey: els.bugJiraKeyInput.value },
+    'Marcada como creada.'
+  );
+});
+els.bugAddImageBtn.addEventListener('click', () => {
+  if (typeof els.bugImageInput.click === 'function') els.bugImageInput.click();
+});
+els.bugImageInput.addEventListener('change', async () => {
+  const files = Array.from(els.bugImageInput.files || []);
+  const selected = state.bugSelectedId;
+  if (!files.length || !selected) return;
+  let added = 0;
+  let rejected = 0;
+  for (const file of files) {
+    const current = findBug(selected);
+    if (!current) break;
+    if (
+      BUG_IMAGE_TYPES.indexOf(file.type) === -1 ||
+      file.size > BUG_MAX_IMAGE_BYTES ||
+      (current.images || []).length >= BUG_MAX_IMAGES
+    ) {
+      rejected += 1;
+      continue;
+    }
+    const bytes = await file.arrayBuffer();
+    const result = await window.api.addBugImage(selected, { type: file.type, bytes });
+    if (!result || !result.ok) {
+      rejected += 1;
+      continue;
+    }
+    replaceBug(result.item);
+    added += 1;
+  }
+  const item = findBug(selected);
+  renderBugList();
+  if (item) await renderBugImages(item);
+  const parts = [];
+  if (added) parts.push(added + ' imagen(es) anadidas');
+  if (rejected) parts.push(rejected + ' archivo(s) descartados');
+  setBugMessage(
+    parts.join(' · ') || 'Ningun archivo es una imagen valida.',
+    parts.length ? 'ok' : 'error'
+  );
+});
+els.bugCopyMdBtn.addEventListener('click', async () => {
+  if (!state.bugSelectedId) return;
+  const result = await window.api.copyBugMarkdown(state.bugSelectedId);
+  if (!result || !result.ok) {
+    setBugMessage('Error: ' + ((result && result.error) || 'desconocido'), 'error');
+    return;
+  }
+  setBugMessage('Markdown copiado (' + result.chars + ' caracteres).', 'ok');
+});
+els.bugCopyPathsBtn.addEventListener('click', async () => {
+  if (!state.bugSelectedId) return;
+  const result = await window.api.copyBugImagePaths(state.bugSelectedId);
+  if (!result || !result.ok) {
+    setBugMessage('Error: ' + ((result && result.error) || 'desconocido'), 'error');
+    return;
+  }
+  setBugMessage('Rutas de ' + result.count + ' imagen(es) copiadas.', 'ok');
+});
+els.bugOpenFolderBtn.addEventListener('click', async () => {
+  if (!state.bugSelectedId) return;
+  const result = await window.api.openBugFolder(state.bugSelectedId);
+  if (!result || !result.ok) {
+    setBugMessage('Error: ' + ((result && result.error) || 'desconocido'), 'error');
+  }
+});
+els.bugArchiveBtn.addEventListener('click', async () => {
+  const item = findBug(state.bugSelectedId);
+  if (!item) return;
+  if (item.state === 'archived') {
+    await patchBug(item.id, { state: item.jiraKey ? 'created' : 'new' }, 'Incidencia restaurada.');
+    return;
+  }
+  await patchBug(item.id, { state: 'archived' }, 'Incidencia archivada.');
+});
+els.bugDeleteBtn.addEventListener('click', async () => {
+  const id = state.bugSelectedId;
+  if (!id) return;
+  if (!state.bugDeleteArmed) {
+    state.bugDeleteArmed = true;
+    els.bugDeleteBtn.textContent = 'Confirmar eliminacion';
+    setBugMessage('Se borra tambien la carpeta con las imagenes. Pulsa otra vez para confirmar.', 'error');
+    return;
+  }
+  const result = await window.api.deleteBug(id);
+  state.bugDeleteArmed = false;
+  if (!result || !result.ok) {
+    els.bugDeleteBtn.textContent = 'Eliminar';
+    setBugMessage('Error: ' + ((result && result.error) || 'desconocido'), 'error');
+    return;
+  }
+  state.bugs = state.bugs.filter((item) => item.id !== id);
+  showNoBugSelected();
+  renderBugList();
+  setBugMessage('Incidencia eliminada.', 'ok');
+});
+
+const bugFilterTabs = [
+  { node: els.bugTabPending, filter: 'pending' },
+  { node: els.bugTabCreated, filter: 'created' },
+  { node: els.bugTabAll, filter: 'all' },
+];
+for (const entry of bugFilterTabs) {
+  entry.node.addEventListener('click', () => {
+    state.bugFilter = entry.filter;
+    for (const other of bugFilterTabs) {
+      other.node.classList.toggle('active', other === entry);
+    }
+    renderBugList();
+  });
+}
+
+// Las capturas hechas mientras la ventana estaba oculta se ven al volver: el
+// contador tiene que reflejarlas aunque la modal este cerrada.
+if (typeof window.addEventListener === 'function') {
+  window.addEventListener('focus', () => loadBugs());
+}
+
 async function init() {
   const config = await window.api.getConfig();
+  loadBugs();
   if (!config || !config.baseUrl || !config.apiToken) {
     showNotConfigured();
     openModal();
