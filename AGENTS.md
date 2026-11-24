@@ -9,17 +9,18 @@ This file is the portable contract. `.opencode/instructions.md` (loaded through 
 | Task | Command |
 | --- | --- |
 | Run the app | `npm start` |
-| Syntax check | `node --check main.js` (also `preload.js`, `adf.js`, `renderer/renderer.js`) |
+| Syntax check | `node --check main.js` (also `preload.js`, `adf.js`, `renderer/renderer.js`, `renderer/capture/capture.js`) |
 | ADF→Markdown checks | `npm run check:adf` (13 assertions) |
 | Copy-flow checks (Jira + GitLab) | `npm run check:copy` (34 assertions) |
 | Renderer GitLab checks | `npm run check:renderer` (27 assertions) |
 | Live-search checks | `npm run check:search` (10 assertions) |
+| Bug inbox checks (capture, storage, tray) | `npm run check:bugs` (40 assertions) |
 | Package unpacked | `npm run pack` |
 | Build installers | `npm run dist` |
 | Serve `dist/` for the updater | `npm run serve:dist` (`PORT`, default 8080) |
 | Regenerate icons | `npx electron scripts/make-icon.js` |
 
-There is no `npm test`, no test framework, and no linter. The four `check:*` scripts are plain Node + `assert`: run them after touching `adf.js`, the copy flow, the GitLab part of the copy modal, or the Jira search combobox. Everything else is verified by running the app.
+There is no `npm test`, no test framework, and no linter. The five `check:*` scripts are plain Node + `assert`: run them after touching `adf.js`, the copy flow, the GitLab part of the copy modal, the Jira search combobox, or anything in the bug inbox (`main.js` handlers, `renderer/capture/`, the bug modal in the main window). Everything else is verified by running the app.
 
 ## Layout
 
@@ -29,6 +30,7 @@ There is no `npm test`, no test framework, and no linter. The four `check:*` scr
 | `adf.js` | Atlassian Document Format → Markdown converter; `main.js` requires it at runtime |
 | `preload.js` | `contextBridge` surface — the only bridge to the renderer |
 | `renderer/` | UI: `index.html`, `renderer.js`, `styles.css` |
+| `renderer/capture/` | Standalone capture window: `index.html`, `capture.js`, `capture.css`, `capture-preload.js` |
 | `scripts/` | `serve-dist.js`, `make-icon.js`, and the `check-*.js` regression scripts |
 | `scripts/test-support/` | `electron-stub.js` and `renderer-stub.js`, used only by the checks |
 | `odd/tasks/` | Feature documents holding the specs the `check:*` assertions encode |
@@ -37,18 +39,18 @@ There is no `npm test`, no test framework, and no linter. The four `check:*` scr
 ## Hard rules
 
 - Never enable `nodeIntegration` or disable `contextIsolation`. Renderer code reaches the main process only through `window.api` in `preload.js`.
-- A new renderer capability needs three edits together: an `ipcMain.handle` in `main.js`, a method in `preload.js`, and the call site in `renderer/renderer.js`.
+- A new renderer capability needs three edits together: an `ipcMain.handle` in `main.js`, a method in `preload.js`, and the call site in `renderer/renderer.js`. The capture window has its own surface (`renderer/capture/capture-preload.js`) and its own CSP: a channel used only there belongs there, not in `preload.js`.
 - Anything shipped at runtime must be listed in `build.files` in `package.json` — `adf.js` is there for that reason. An unlisted runtime file is absent from the packaged app with no error.
 - Treat all Jira and GitLab content as untrusted. Build DOM with `createElement` + `textContent`; never interpolate remote data into `innerHTML`.
 - `shell.openExternal` stays restricted to `http:`/`https:` URLs validated in the main process.
 - Jira and GitLab tokens sit in plain text in `app.getPath('userData')/config.json`. Never log them, expose them outside password fields, or commit them. Send the GitLab token only to the configured GitLab URL.
-- Keep the CSP in `renderer/index.html` working: no inline `<script>`, no remote script or style origins.
+- Keep the CSP in `renderer/index.html` working: no inline `<script>`, no remote script or style origins. `img-src 'self' data:` is required there and in the capture window: bug thumbnails are served as data URLs.
 
 ## Checks run headless, not in Electron
 
-`check-copy-flow.js` monkeypatches `Module._resolveFilename` so `require('electron')` resolves to `scripts/test-support/electron-stub.js`, then serves fake Jira/GitLab from a local `http` server. `check-renderer-gitlab.js` runs the real `renderer/renderer.js` against `renderer-stub.js` with a fake clock, advancing the 250 ms search debounce explicitly. Reuse those stubs instead of inventing a harness, and register a `check:` script in `package.json` when you add one.
+`check-copy-flow.js` monkeypatches `Module._resolveFilename` so `require('electron')` resolves to `scripts/test-support/electron-stub.js`, then serves fake Jira/GitLab from a local `http` server. `check-renderer-gitlab.js` runs the real `renderer/renderer.js` against `renderer-stub.js` with a fake clock, advancing the 250 ms search debounce explicitly. `check-bug-inbox.js` uses both stubs: the main-process bug handlers and the tray/shortcut surface through `electron-stub.js` (which now also fakes `globalShortcut`, `Tray`, `screen` and `BrowserWindow`), and the real `renderer/capture/capture.js` through `renderer-stub.js` (`sourceFile` option). Reuse those stubs instead of inventing a harness, and register a `check:` script in `package.json` when you add one.
 
-Because `main.js` requires `electron-updater` for real, running a checker from a scratch copy needs `NODE_PATH` pointed at the repo's `node_modules`. The renderer harness also needs 2–4 `setImmediate` ticks to settle a chain of awaited IPC calls; a single tick asserts against stale state.
+Because `main.js` requires `electron-updater` for real, running a checker from a scratch copy needs `NODE_PATH` pointed at the repo's `node_modules`. The renderer harness also needs 2–4 `setImmediate` ticks to settle a chain of awaited IPC calls; a single tick asserts against stale state. In the harness, clearing an element means `el.textContent = ''`, which drops its children — the same as the real DOM.
 
 ## Sensitive areas
 
@@ -60,6 +62,12 @@ Need manual verification against a real Jira instance:
 - The copy flow reuses one cached issue payload for 10 minutes: `jira:issueCopyData` fills it and `copy:issue` reads it, so the two must agree on the issue key.
 - `configureUpdater` — a wrong feed URL stops updates silently.
 - Read state is owned by the renderer (`localStorage`, key `notijira:readIds`), not by the main process.
+
+Need manual verification on a real desktop (the OS owns them, the checks can only fake them):
+
+- `globalShortcut.register` and the tray: the hotkey only fires when another app has focus, and the tray menu is the only fallback when the combo is taken. `check:bugs` pins the registration/revert logic, not the OS behaviour.
+- Bug images are only reachable through `BUG_ID_PATTERN`/`BUG_IMAGE_PATTERN`; every path is validated before read, write or delete, so a hand-edited `nota.json` cannot escape `bugs/<id>/`.
+- `app.requestSingleInstanceLock` plus hide-on-close with a tray: two instances would fight over the global shortcut.
 
 ## Release
 
