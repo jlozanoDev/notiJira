@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;"
     />
     <title>NotiJira</title>
     <link rel="stylesheet" href="styles.css" />
@@ -19,6 +19,19 @@
         </div>
       </div>
       <div class="actions">
+        <button
+          id="bugsBtn"
+          class="btn btn-secondary btn-icon"
+          title="Incidencias capturadas"
+          aria-label="Incidencias capturadas"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              d="M19 8h-2.2a6.9 6.9 0 0 0-1.6-1.7l1.4-1.4-1.4-1.4-1.8 1.8A6.6 6.6 0 0 0 12 4.8c-.8 0-1.5.1-2.2.4L8 3.5 6.6 4.9 8 6.3A6.9 6.9 0 0 0 6.4 8H5v2h1.3c-.1.5-.2 1-.2 1.5h-.9v2h.9c.1 1.6.8 3 1.8 4.1L6.6 18.9 8 20.3l1.7-1.7c.7.3 1.5.5 2.3.5s1.6-.2 2.3-.5l1.7 1.7 1.4-1.4-1.3-1.3c1-1.1 1.7-2.5 1.8-4.1h.9v-2h-.9c0-.5-.1-1-.2-1.5h1.3V8zM9 13.5v-4h6v4a3 3 0 0 1-6 0z"
+            />
+          </svg>
+          <span id="bugsCount" class="btn-badge hidden">0</span>
+        </button>
         <button
           id="searchBtn"
           class="btn btn-secondary btn-icon"
@@ -163,6 +176,29 @@
                 Eliminar credenciales de GitLab
               </button>
             </div>
+          </section>
+          <section class="settings-section" aria-labelledby="bugSettingsTitle">
+            <h3 id="bugSettingsTitle">Captura rapida</h3>
+            <label>
+              Atajo para capturar
+              <input
+                id="bugHotkey"
+                type="text"
+                readonly
+                placeholder="Pulsa una combinacion"
+                autocomplete="off"
+              />
+              <small
+                >Haz clic aqui y pulsa la combinacion (por defecto Ctrl+Alt+J).
+                Funciona con cualquier aplicacion en primer plano. Esc vacia el
+                campo y vuelve al atajo predeterminado. Si el atajo esta
+                ocupado se conserva el anterior y se avisa.</small
+              >
+            </label>
+            <label class="copy-option">
+              <input id="bugStartAtLogin" type="checkbox" />
+              <span>Arrancar con Windows</span>
+            </label>
           </section>
           <div id="formMessage" class="form-message"></div>
           <div class="modal-actions">
@@ -313,6 +349,140 @@
           <button type="button" id="copyDoBtn" class="btn btn-primary">
             Copiar al portapapeles
           </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="bugsModal" class="modal-overlay hidden">
+      <div class="modal modal-bugs">
+        <div class="bugs-header">
+          <h2>Incidencias</h2>
+          <div class="spacer"></div>
+          <button type="button" id="bugNewBtn" class="btn btn-primary">
+            Capturar
+          </button>
+          <button type="button" id="bugsCloseBtn" class="btn btn-ghost">
+            Cerrar
+          </button>
+        </div>
+
+        <div class="filter-tabs" role="tablist">
+          <button
+            type="button"
+            id="bugTabPending"
+            class="filter-tab active"
+            data-bug-filter="pending"
+          >
+            Pendientes <span class="filter-count" id="bugCountPending">0</span>
+          </button>
+          <button type="button" id="bugTabCreated" class="filter-tab" data-bug-filter="created">
+            Creadas <span class="filter-count" id="bugCountCreated">0</span>
+          </button>
+          <button type="button" id="bugTabAll" class="filter-tab" data-bug-filter="all">
+            Todas <span class="filter-count" id="bugCountAll">0</span>
+          </button>
+        </div>
+
+        <input
+          id="bugSearch"
+          class="bug-search"
+          type="text"
+          placeholder="Buscar por titulo, detalles, enlace o clave"
+          autocomplete="off"
+        />
+
+        <div class="bugs-layout">
+          <ul id="bugList" class="bug-list" aria-label="Incidencias capturadas"></ul>
+
+          <div class="bug-detail">
+            <p id="bugEmpty" class="bug-empty">Selecciona una incidencia.</p>
+            <div id="bugDetailBody" class="bug-detail-body hidden">
+              <label>
+                Titulo
+                <input id="bugTitleInput" type="text" maxlength="300" />
+              </label>
+              <label>
+                Detalles
+                <textarea id="bugDetailsInput" rows="5"></textarea>
+              </label>
+              <div class="field">
+                <label for="bugLinkInput">Enlaces</label>
+                <div class="link-row">
+                  <input
+                    id="bugLinkInput"
+                    type="text"
+                    placeholder="https://..."
+                    autocomplete="off"
+                  />
+                  <button type="button" id="bugAddLinkBtn" class="btn btn-secondary">
+                    Anadir
+                  </button>
+                </div>
+                <div id="bugLinkChips" class="chip-list"></div>
+              </div>
+              <label>
+                Issue relacionado
+                <input
+                  id="bugIssueInput"
+                  type="text"
+                  placeholder="CLIN-530 o URL de Jira"
+                  autocomplete="off"
+                />
+              </label>
+
+              <div class="bug-images-head">
+                <span class="bug-section-title">Imagenes</span>
+                <button type="button" id="bugAddImageBtn" class="btn btn-ghost">
+                  Anadir imagen
+                </button>
+                <input
+                  id="bugImageInput"
+                  type="file"
+                  accept="image/png,image/jpeg,image/gif,image/webp"
+                  multiple
+                  hidden
+                />
+              </div>
+              <div id="bugImages" class="chip-list"></div>
+              <p id="bugImagesEmpty" class="hint">Sin imagenes.</p>
+
+              <div id="bugCreatedRow" class="bug-created">
+                <input
+                  id="bugJiraKeyInput"
+                  type="text"
+                  placeholder="CLIN-530"
+                  autocomplete="off"
+                />
+                <button type="button" id="bugMarkCreatedBtn" class="btn btn-secondary">
+                  Marcar como creada
+                </button>
+              </div>
+              <div id="bugCreatedInfo" class="bug-created-info hidden"></div>
+              <p id="bugMeta" class="bug-meta"></p>
+
+              <div class="bug-actions">
+                <button type="button" id="bugSaveBtn" class="btn btn-primary">
+                  Guardar cambios
+                </button>
+                <button type="button" id="bugCopyMdBtn" class="btn btn-secondary">
+                  Copiar Markdown
+                </button>
+                <button type="button" id="bugCopyPathsBtn" class="btn btn-secondary">
+                  Copiar rutas
+                </button>
+                <button type="button" id="bugOpenFolderBtn" class="btn btn-ghost">
+                  Abrir carpeta
+                </button>
+                <button type="button" id="bugArchiveBtn" class="btn btn-ghost">
+                  Archivar
+                </button>
+                <button type="button" id="bugDeleteBtn" class="btn btn-ghost btn-danger">
+                  Eliminar
+                </button>
+              </div>
+              <div id="bugMessage" class="form-message"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
