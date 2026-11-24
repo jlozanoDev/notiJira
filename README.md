@@ -4,7 +4,7 @@ Aplicación de escritorio para Windows que vigila Jira y te avisa cuando te menc
 
 ## Descargar
 
-[Descargar NotiJira v1.1.3 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.1.3). En **Assets**, elige `NotiJira.Setup.1.1.3.exe` para instalar o `NotiJira.1.1.3.exe` para usar la versión portable.
+[Descargar NotiJira v1.1.4 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.1.4). En **Assets**, elige `NotiJira.Setup.1.1.4.exe` para instalar o `NotiJira.1.1.4.exe` para usar la versión portable.
 
 ## Ruta rápida
 
@@ -64,8 +64,9 @@ El diff de la comparación se añade al final del Markdown copiado. Las credenci
 | `npm run pack` | Genera la app sin instalador en `dist/` |
 | `npm run dist` | Genera el instalador NSIS y la versión portable en `dist/` |
 | `npm run check:adf` | Comprueba el conversor ADF→Markdown (13 aserciones) |
-| `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira y un GitLab simulados (33 aserciones) |
+| `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira y un GitLab simulados (34 aserciones) |
 | `npm run check:renderer` | Comprueba la parte de GitLab de la modal de copia con el `renderer.js` real y un DOM simulado (27 aserciones) |
+| `npm run check:search` | Comprueba el combo de búsqueda de Jira con el `renderer.js` real y un reloj simulado (10 aserciones) |
 | `npm run serve:dist` | Sirve `dist/` por HTTP para el actualizador. Usa `PORT` (por defecto 8080) |
 | `npx electron scripts/make-icon.js` | Regenera `assets/icon.png` y `assets/icon.ico` desde `assets/jira.svg` |
 
@@ -111,7 +112,7 @@ Si el campo queda vacío, se usa la URL de `build.publish` de `package.json`. La
 
 ## Limitaciones conocidas
 
-- No hay framework de tests ni linter. Los scripts `check:adf`, `check:copy` y `check:renderer` son regresiones headless con Node y `assert`; el resto se verifica a mano ejecutando la app.
+- No hay framework de tests ni linter. Los scripts `check:adf`, `check:copy`, `check:renderer` y `check:search` son regresiones headless con Node y `assert`; el resto se verifica a mano ejecutando la app.
 - Jira Cloud no expone un feed de notificaciones fiable, así que la app escanea comentarios: hasta 100 issues y 10 páginas de comentarios por issue.
 - El estado de lectura es local a cada equipo; no se sincroniza con Jira ni entre instalaciones.
 - La app está pensada para una sola cuenta de Jira por equipo.

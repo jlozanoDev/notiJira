@@ -22,12 +22,10 @@ const els = {
   cancelBtn: document.getElementById('cancelBtn'),
   searchBtn: document.getElementById('searchBtn'),
   searchModal: document.getElementById('searchModal'),
-  searchForm: document.getElementById('searchForm'),
   searchInput: document.getElementById('searchInput'),
+  searchList: document.getElementById('searchList'),
   searchMessage: document.getElementById('searchMessage'),
-  searchResults: document.getElementById('searchResults'),
   searchCancelBtn: document.getElementById('searchCancelBtn'),
-  searchSubmitBtn: document.getElementById('searchSubmitBtn'),
   copyModal: document.getElementById('copyModal'),
   copyTitle: document.getElementById('copyTitle'),
   copySubtitle: document.getElementById('copySubtitle'),
@@ -52,6 +50,7 @@ const els = {
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
 const READ_IDS_KEY = 'notijira:readIds';
+const SEARCH_MIN_CHARS = 2;
 
 function loadReadIds() {
   try {
@@ -623,15 +622,17 @@ function setGitlabMessage(message, type) {
 }
 
 function openSearchModal() {
-  setSearchMessage('', '');
-  els.searchResults.innerHTML = '';
-  els.searchResults.classList.add('hidden');
-  els.searchInput.value = '';
+  searchCombo.reset();
+  setSearchMessage(
+    state.config ? '' : 'Configura Jira primero.',
+    state.config ? '' : 'error'
+  );
   els.searchModal.classList.remove('hidden');
   els.searchInput.focus();
 }
 
 function closeSearchModal() {
+  searchCombo.reset();
   els.searchModal.classList.add('hidden');
 }
 
@@ -640,55 +641,32 @@ function closeCopyModal() {
   state.copyData = null;
 }
 
-function renderSearchResults(results) {
-  els.searchResults.innerHTML = '';
+// Contenido de cada opcion del combo del buscador: clave, resumen, estado y
+// fecha en una sola fila, con el resumen truncado.
+function renderSearchOption(item, option) {
+  option.classList.add('result-option');
 
-  if (!results.length) {
-    els.searchResults.classList.add('hidden');
-    setSearchMessage('Sin resultados. Prueba con otra descripcion.', 'error');
-    return;
+  const key = document.createElement('span');
+  key.className = 'issue-key';
+  key.textContent = item.key;
+  option.appendChild(key);
+
+  const summary = document.createElement('span');
+  summary.className = 'search-result-summary';
+  summary.textContent = item.summary;
+  option.appendChild(summary);
+
+  if (item.status) {
+    const status = document.createElement('span');
+    status.className = 'badge';
+    status.textContent = item.status;
+    option.appendChild(status);
   }
 
-  els.searchResults.classList.remove('hidden');
-  setSearchMessage(
-    `${results.length} resultado${results.length === 1 ? '' : 's'}.`,
-    'ok'
-  );
-
-  for (const item of results) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'search-result';
-
-    const key = document.createElement('span');
-    key.className = 'issue-key';
-    key.textContent = item.key;
-    row.appendChild(key);
-
-    const summary = document.createElement('span');
-    summary.className = 'search-result-summary';
-    summary.textContent = item.summary;
-    row.appendChild(summary);
-
-    if (item.status) {
-      const status = document.createElement('span');
-      status.className = 'badge';
-      status.textContent = item.status;
-      row.appendChild(status);
-    }
-
-    const updated = document.createElement('span');
-    updated.className = 'search-result-date';
-    updated.textContent = formatDate(item.updated);
-    row.appendChild(updated);
-
-    row.addEventListener('click', () => {
-      closeSearchModal();
-      openCopyModal(item.key, item.summary);
-    });
-
-    els.searchResults.appendChild(row);
-  }
+  const updated = document.createElement('span');
+  updated.className = 'search-result-date';
+  updated.textContent = formatDate(item.updated);
+  option.appendChild(updated);
 }
 
 function copyRow(label, preview, checked, disabled, onChange) {
@@ -788,7 +766,7 @@ const COMBO_NO_MATCH = 'Sin coincidencias';
 const COMBO_PAGE_SIZE = 100;
 const COMBO_SEARCH_DEBOUNCE_MS = 250;
 
-function createGitlabCombo(input, list, options) {
+function createCombo(input, list, options) {
   const combo = {
     input,
     list,
@@ -796,6 +774,17 @@ function createGitlabCombo(input, list, options) {
     fetchItems: options.fetchItems,
     onChange: options.onChange || null,
     prerequisite: options.prerequisite || null,
+    renderOption: options.renderOption || null,
+    onResults: options.onResults || null,
+    setMessage: options.setMessage || (() => {}),
+    isActive: options.isActive || (() => true),
+    session: options.session || (() => 0),
+    minChars: options.minChars || 0,
+    visible: options.visible || COMBO_VISIBLE,
+    commitOnBlur: options.commitOnBlur !== false,
+    keepTypedOnEscape: options.keepTypedOnEscape === true,
+    disableWhenInactive: options.disableWhenInactive === true,
+    closeOnError: options.closeOnError === true,
     items: [],
     shown: [],
     selected: null,
@@ -805,8 +794,8 @@ function createGitlabCombo(input, list, options) {
     timer: null,
   };
 
-  // Las sugerencias ya vienen filtradas por GitLab.
-  combo.matches = () => combo.items.slice(0, COMBO_VISIBLE);
+  // Las sugerencias ya vienen filtradas por el servidor.
+  combo.matches = () => combo.items.slice(0, combo.visible);
 
   combo.render = () => {
     combo.list.innerHTML = '';
@@ -837,7 +826,8 @@ function createGitlabCombo(input, list, options) {
         'aria-selected',
         String(!!(combo.selected && combo.selected.value === item.value))
       );
-      option.textContent = item.label;
+      if (combo.renderOption) combo.renderOption(item, option);
+      else option.textContent = item.label;
       option.addEventListener('mousedown', (event) => {
         if (event && event.preventDefault) event.preventDefault();
         combo.choose(item);
@@ -869,11 +859,10 @@ function createGitlabCombo(input, list, options) {
   // El campo se puede editar mientras el panel esté abierto y tenga algo que
   // buscar: sin proyecto no hay ramas que listar, pero un fallo de red no debe
   // bloquear el reintento.
-  combo.panelOpen = () =>
-    els.includeMrCheckbox.checked && !els.gitlabSelection.classList.contains('hidden');
   combo.ready = () => (combo.prerequisite ? !!combo.prerequisite() : true);
   combo.refreshDisabled = () => {
-    if (!combo.panelOpen()) {
+    if (!combo.disableWhenInactive) return;
+    if (!combo.isActive()) {
       combo.input.disabled = true;
       return;
     }
@@ -893,7 +882,7 @@ function createGitlabCombo(input, list, options) {
     combo.items = Array.isArray(items) ? items : [];
     combo.refreshDisabled();
     if (truncated) {
-      setGitlabMessage(
+      combo.setMessage(
         `Se muestran solo los primeros ${COMBO_PAGE_SIZE} resultados; escribe un texto mas concreto.`,
         'error'
       );
@@ -924,7 +913,7 @@ function createGitlabCombo(input, list, options) {
   // Busca en GitLab. `immediate` salta el retardo (carga inicial y al copiar).
   combo.request = (query, immediate) => {
     const seq = ++combo.seq;
-    const session = state.gitlabSession;
+    const session = combo.session();
     if (combo.timer) {
       clearTimeout(combo.timer);
       combo.timer = null;
@@ -937,14 +926,16 @@ function createGitlabCombo(input, list, options) {
       } catch (err) {
         result = { ok: false, error: err.message };
       }
-      if (seq !== combo.seq || session !== state.gitlabSession) return;
-      if (!els.includeMrCheckbox.checked) return;
+      if (seq !== combo.seq || session !== combo.session()) return;
+      if (!combo.isActive()) return;
       if (!result.ok) {
         combo.applySearchItems([], false);
-        setGitlabMessage(`Error al consultar ${combo.label}: ${result.error}`, 'error');
+        if (combo.closeOnError) combo.setOpen(false);
+        combo.setMessage(`Error al consultar ${combo.label}: ${result.error}`, 'error');
         return result;
       }
       combo.applySearchItems(result.items, result.truncated);
+      if (combo.onResults) combo.onResults(result, combo.items);
       return result;
     };
     if (immediate) return run();
@@ -1009,13 +1000,30 @@ function createGitlabCombo(input, list, options) {
   combo.input.addEventListener('input', () => {
     combo.selected = null;
     combo.active = -1;
+    const term = combo.input.value.trim();
+    if (term.length < combo.minChars) {
+      combo.seq += 1;
+      if (combo.timer) {
+        clearTimeout(combo.timer);
+        combo.timer = null;
+      }
+      combo.items = [];
+      combo.setOpen(false);
+      combo.setMessage(
+        term ? `Escribe al menos ${combo.minChars} caracteres.` : '',
+        term ? 'error' : ''
+      );
+      return;
+    }
     combo.setOpen(true);
-    combo.request(combo.input.value.trim(), false);
+    combo.request(term, false);
   });
-  combo.input.addEventListener('focus', () => combo.setOpen(true));
+  combo.input.addEventListener('focus', () => {
+    if (combo.input.value.trim().length >= combo.minChars) combo.setOpen(true);
+  });
   combo.input.addEventListener('blur', () => {
     combo.setOpen(false);
-    combo.commitTyped();
+    if (combo.commitOnBlur) combo.commitTyped();
   });
   combo.input.addEventListener('keydown', (event) => {
     const key = event && event.key;
@@ -1046,6 +1054,10 @@ function createGitlabCombo(input, list, options) {
     }
     if (key === 'Escape') {
       if (event.preventDefault) event.preventDefault();
+      if (combo.keepTypedOnEscape) {
+        combo.setOpen(false);
+        return;
+      }
       combo.apply(combo.selected);
       combo.setOpen(false);
     }
@@ -1055,35 +1067,107 @@ function createGitlabCombo(input, list, options) {
   return combo;
 }
 
-const gitlabProjectCombo = createGitlabCombo(
+// Opciones comunes de los combos de GitLab: solo cuentan cuando el panel de MR
+// esta abierto, y cualquier cambio de sesion invalida las respuestas en vuelo.
+const gitlabComboBase = (extra) =>
+  Object.assign(
+    {
+      isActive: () =>
+        els.includeMrCheckbox.checked && !els.gitlabSelection.classList.contains('hidden'),
+      session: () => state.gitlabSession,
+      setMessage: setGitlabMessage,
+      disableWhenInactive: true,
+    },
+    extra
+  );
+
+const gitlabProjectCombo = createCombo(
   els.gitlabProjectInput,
   els.gitlabProjectList,
-  {
+  gitlabComboBase({
     // El texto del error de proyectos se mantiene igual que antes de la busqueda.
     label: 'GitLab',
     fetchItems: fetchGitlabProjectItems,
     onChange: (project) => loadGitlabBranches(project.value),
-  }
+  })
 );
-const gitlabSourceCombo = createGitlabCombo(
+const gitlabSourceCombo = createCombo(
   els.gitlabSourceBranchInput,
   els.gitlabSourceBranchList,
-  {
+  gitlabComboBase({
     label: 'las ramas',
     fetchItems: (term) => fetchGitlabBranchItems(term),
     prerequisite: () => !!gitlabProjectCombo.selected,
-  }
+  })
 );
-const gitlabTargetCombo = createGitlabCombo(
+const gitlabTargetCombo = createCombo(
   els.gitlabTargetBranchInput,
   els.gitlabTargetBranchList,
-  {
+  gitlabComboBase({
     label: 'las ramas',
     fetchItems: (term) => fetchGitlabBranchItems(term),
     prerequisite: () => !!gitlabProjectCombo.selected,
-  }
+  })
 );
 const gitlabCombos = [gitlabProjectCombo, gitlabSourceCombo, gitlabTargetCombo];
+
+// ---------------------------------------------------------------------------
+// Buscador de tareas: el mismo combo que GitLab, alimentado por jira:searchIssues
+// ---------------------------------------------------------------------------
+
+const SEARCH_EMPTY_HINT =
+  'Sin coincidencias. Prueba con otra descripcion o con la clave completa.';
+
+function issueItem(issue) {
+  return Object.assign({}, issue, {
+    label: `${issue.key} — ${issue.summary}`,
+    value: issue.key,
+  });
+}
+
+const searchCombo = createCombo(els.searchInput, els.searchList, {
+  label: 'Jira',
+  minChars: SEARCH_MIN_CHARS,
+  visible: 8,
+  commitOnBlur: false,
+  keepTypedOnEscape: true,
+  closeOnError: true,
+  setMessage: setSearchMessage,
+  fetchItems: async (term) => {
+    if (!state.config) return { ok: true, items: [] };
+    let result;
+    try {
+      result = await window.api.searchIssues(state.config, term);
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+    if (!result.ok) return { ok: false, error: result.error };
+    return {
+      ok: true,
+      items: (result.results || []).map(issueItem),
+      notice: result.error || '',
+    };
+  },
+  renderOption: renderSearchOption,
+  onResults: (result, items) => {
+    if (result.notice && !items.length) {
+      setSearchMessage(result.notice, 'error');
+      return;
+    }
+    if (items.length) {
+      setSearchMessage(
+        `${items.length} coincidencia${items.length === 1 ? '' : 's'}.`,
+        'ok'
+      );
+      return;
+    }
+    setSearchMessage(SEARCH_EMPTY_HINT, 'error');
+  },
+  onChange: (item) => {
+    closeSearchModal();
+    openCopyModal(item.value, item.summary);
+  },
+});
 
 function projectLabel(project) {
   return project.pathWithNamespace || project.name || String(project.id);
@@ -1248,39 +1332,6 @@ els.searchBtn.addEventListener('click', openSearchModal);
 els.searchCancelBtn.addEventListener('click', closeSearchModal);
 els.searchModal.addEventListener('click', (e) => {
   if (e.target === els.searchModal) closeSearchModal();
-});
-
-els.searchForm.addEventListener('submit', async (e) => {
-  e.preventDefault();
-  if (!state.config) {
-    setSearchMessage('Configura Jira primero.', 'error');
-    return;
-  }
-  const query = els.searchInput.value.trim();
-  if (!query) {
-    setSearchMessage('Escribe una clave de tarea o una descripcion.', 'error');
-    return;
-  }
-
-  els.searchSubmitBtn.disabled = true;
-  setSearchMessage('Buscando...', '');
-  const result = await window.api.searchIssues(state.config, query);
-  els.searchSubmitBtn.disabled = false;
-
-  if (!result.ok) {
-    els.searchResults.innerHTML = '';
-    els.searchResults.classList.add('hidden');
-    setSearchMessage('Error: ' + result.error, 'error');
-    return;
-  }
-  renderSearchResults(result.results || []);
-  if (result.error) {
-    setSearchMessage(
-      result.error +
-        (result.results && result.results.length ? '' : ' Sin resultados.'),
-      'error'
-    );
-  }
 });
 
 els.selectAllBtn.addEventListener('click', () => {

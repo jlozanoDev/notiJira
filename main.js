@@ -550,37 +550,54 @@ function searchResult(issue, baseUrl) {
   };
 }
 
+const SEARCH_RESULT_FIELDS = ['summary', 'status', 'issuetype', 'updated'];
+const SEARCH_RESULT_LIMIT = 20;
+const ISSUE_KEY_PATTERN = /^([A-Za-z][A-Za-z0-9_]*)-(\d+)$/;
+
+function parseIssueKey(text) {
+  const match = String(text || '').trim().match(ISSUE_KEY_PATTERN);
+  return match ? `${match[1].toUpperCase()}-${match[2]}` : '';
+}
+
 async function searchIssuesForCopy(config, query) {
   const text = String(query || '').trim();
   if (!text) throw new Error('Escribe una clave de tarea o una descripcion');
   const baseUrl = normalizeBaseUrl(config.baseUrl);
+  const issueKey = parseIssueKey(text);
 
-  let notice = '';
-  const keyMatch = text.match(/^([A-Za-z][A-Za-z0-9_]*-\d+)$/);
-  if (keyMatch) {
-    try {
-      const issue = await jiraRequest(
-        config,
-        `/rest/api/3/issue/${keyMatch[1].toUpperCase()}?fields=summary,status,issuetype,updated`
-      );
-      return { results: [searchResult(issue, baseUrl)] };
-    } catch (err) {
-      if (err.status !== 404) throw err;
-      // La clave no existe: se avisa y se permite buscar igualmente por texto
-      notice = `La tarea ${keyMatch[1].toUpperCase()} no existe; se busca como texto.`;
+  // Una clave completa abre la tarea directamente (una sola peticion) y evita el
+  // 400 que devuelve JQL cuando la clave no existe. Se prueban v3 y v2 porque
+  // Jira Server/Data Center solo expone v2.
+  if (issueKey) {
+    for (const version of ['3', '2']) {
+      try {
+        const issue = await jiraRequest(
+          config,
+          `/rest/api/${version}/issue/${issueKey}?fields=${SEARCH_RESULT_FIELDS.join(',')}`
+        );
+        return { results: [searchResult(issue, baseUrl)] };
+      } catch (err) {
+        if (err.status !== 404) throw err;
+      }
     }
   }
 
+  // `text` cubre resumen, descripcion, entorno y comentarios de la tarea.
   const jql = `text ~ "${escapeJqlText(text)}" ORDER BY updated DESC`;
   const search = await searchIssues(
     config,
     jql,
-    ['summary', 'status', 'issuetype', 'updated'],
-    20
+    SEARCH_RESULT_FIELDS,
+    SEARCH_RESULT_LIMIT
   );
+  const results = (search.issues || []).map((issue) => searchResult(issue, baseUrl));
+
   return {
-    results: (search.issues || []).map((issue) => searchResult(issue, baseUrl)),
-    error: notice || undefined,
+    results,
+    error:
+      issueKey && !results.length
+        ? `La tarea ${issueKey} no existe; se busca por texto.`
+        : undefined,
   };
 }
 

@@ -536,6 +536,36 @@ body {
   font-weight: 600;
 }
 
+/* Opcion de tarea: clave, resumen, estado y fecha en una sola fila. */
+.combo-option.result-option {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.result-option .issue-key,
+.result-option .badge,
+.result-option .search-result-date {
+  flex: 0 0 auto;
+}
+
+.result-option .search-result-summary {
+  flex: 1;
+}
+
+.combo-help {
+  display: block;
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-subtle);
+}
+
+/* El desplegable del combo se dibuja fuera de la caja de la modal. */
+.modal-search {
+  overflow: visible;
+}
+
 .combo-empty {
   padding: 6px 8px;
   font-size: 12px;
@@ -663,36 +693,6 @@ body {
 }
 
 /* Buscador de tareas */
-.search-results {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  max-height: 40vh;
-  overflow-y: auto;
-}
-
-.search-result {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  text-align: left;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 8px 10px;
-  font-family: inherit;
-  font-size: 13px;
-  color: var(--text);
-  cursor: pointer;
-  transition: background 0.1s ease, border-color 0.1s ease;
-}
-
-.search-result:hover {
-  background: var(--surface-hover);
-  border-color: var(--border-strong);
-}
-
 .search-result-summary {
   flex: 1;
   min-width: 0;
@@ -820,12 +820,10 @@ body {
   line-height: 1.4;
 }
 
-.search-results::-webkit-scrollbar,
 .copy-list::-webkit-scrollbar {
   width: 10px;
 }
 
-.search-results::-webkit-scrollbar-thumb,
 .copy-list::-webkit-scrollbar-thumb {
   background: #c1c7d0;
   border-radius: 5px;
