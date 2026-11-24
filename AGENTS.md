@@ -19,7 +19,7 @@ This file is the portable contract. `.opencode/instructions.md` (loaded through 
 | Serve `dist/` for the updater | `npm run serve:dist` (`PORT`, default 8080) |
 | Regenerate icons | `npx electron scripts/make-icon.js` |
 
-There is no `npm test`, no test framework, and no linter. The three `check:*` scripts are plain Node + `assert`: run them after touching `adf.js`, the copy flow, or the GitLab part of the copy modal. Everything else is verified by running the app.
+There is no `npm test`, no test framework, and no linter. The four `check:*` scripts are plain Node + `assert`: run them after touching `adf.js`, the copy flow, the GitLab part of the copy modal, or the Jira search combobox. Everything else is verified by running the app.
 
 ## Layout
 
