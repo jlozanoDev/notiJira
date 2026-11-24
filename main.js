@@ -980,14 +980,18 @@ function normalizeBugLinks(links) {
   return normalized;
 }
 
-function normalizeBugNote(raw) {
+function normalizeBugNote(raw, trustedId) {
   const note = raw && typeof raw === 'object' ? raw : {};
   const createdAt =
     typeof note.createdAt === 'string' && note.createdAt
       ? note.createdAt
       : new Date().toISOString();
   return {
-    id: typeof note.id === 'string' ? note.id : '',
+    // El identificador lo define la carpeta, nunca lo que dice el JSON guardado:
+    // un nota.json editado no puede redirigir la escritura a otra ruta.
+    id: String(
+      trustedId || (BUG_ID_PATTERN.test(String(note.id || '')) ? note.id : '')
+    ),
     title: String(note.title || '').slice(0, MAX_BUG_TITLE),
     details: String(note.details || '').slice(0, MAX_BUG_DETAILS),
     links: normalizeBugLinks(note.links),
@@ -1006,6 +1010,9 @@ function normalizeBugNote(raw) {
 }
 
 function writeBugNote(note) {
+  if (!BUG_ID_PATTERN.test(String((note && note.id) || ''))) {
+    throw new Error('Incidencia no valida');
+  }
   const dir = bugDir(note.id);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(bugNotePath(note.id), JSON.stringify(note, null, 2), 'utf-8');
@@ -1014,7 +1021,7 @@ function writeBugNote(note) {
 function readBugNote(id) {
   if (!BUG_ID_PATTERN.test(String(id || ''))) throw new Error('Incidencia no valida');
   const raw = fs.readFileSync(bugNotePath(id), 'utf-8');
-  return normalizeBugNote(JSON.parse(raw));
+  return normalizeBugNote(JSON.parse(raw), id);
 }
 
 function listBugs() {
@@ -1106,16 +1113,20 @@ function createBug(payload) {
   if (!title) throw new Error('El titulo de la incidencia es obligatorio');
 
   const now = new Date().toISOString();
-  const note = normalizeBugNote({
-    id: newBugId(),
-    title,
-    details: input.details,
-    links: input.links,
-    issueKey: input.issueKey,
-    state: 'new',
-    createdAt: now,
-    updatedAt: now,
-  });
+  const id = newBugId();
+  const note = normalizeBugNote(
+    {
+      id,
+      title,
+      details: input.details,
+      links: input.links,
+      issueKey: input.issueKey,
+      state: 'new',
+      createdAt: now,
+      updatedAt: now,
+    },
+    id
+  );
 
   fs.mkdirSync(bugDir(note.id), { recursive: true });
   let failed = 0;
@@ -1517,8 +1528,10 @@ ipcMain.handle('config:save', (_event, config) => {
       ? incoming.bugStartAtLogin === true
       : stored.bugStartAtLogin === true;
 
+  const hotkeyBefore = activeBugHotkey;
+  let shortcut = null;
   try {
-    const shortcut = applyBugShortcut(bugHotkey);
+    shortcut = applyBugShortcut(bugHotkey);
     writeConfig({
       baseUrl: normalizeBaseUrl(incoming.baseUrl),
       email: (incoming.email || '').trim(),
@@ -1533,6 +1546,11 @@ ipcMain.handle('config:save', (_event, config) => {
     applyAutostart(bugStartAtLogin);
     return shortcut.ok ? { ok: true } : { ok: true, hotkeyError: shortcut.error };
   } catch (err) {
+    // El atajo ya estaba registrado cuando fallo la escritura: no debe quedar
+    // activo un combinado que no se pudo guardar.
+    if (shortcut && shortcut.ok && hotkeyBefore && hotkeyBefore !== bugHotkey) {
+      applyBugShortcut(hotkeyBefore);
+    }
     return { ok: false, error: err.message };
   }
 });

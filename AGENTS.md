@@ -14,7 +14,7 @@ This file is the portable contract. `.opencode/instructions.md` (loaded through 
 | Copy-flow checks (Jira + GitLab) | `npm run check:copy` (34 assertions) |
 | Renderer GitLab checks | `npm run check:renderer` (27 assertions) |
 | Live-search checks | `npm run check:search` (10 assertions) |
-| Bug inbox checks (capture, storage, tray) | `npm run check:bugs` (40 assertions) |
+| Bug inbox checks (capture, storage, tray) | `npm run check:bugs` (45 assertions) |
 | Package unpacked | `npm run pack` |
 | Build installers | `npm run dist` |
 | Serve `dist/` for the updater | `npm run serve:dist` (`PORT`, default 8080) |
@@ -44,7 +44,7 @@ There is no `npm test`, no test framework, and no linter. The five `check:*` scr
 - Treat all Jira and GitLab content as untrusted. Build DOM with `createElement` + `textContent`; never interpolate remote data into `innerHTML`.
 - `shell.openExternal` stays restricted to `http:`/`https:` URLs validated in the main process.
 - Jira and GitLab tokens sit in plain text in `app.getPath('userData')/config.json`. Never log them, expose them outside password fields, or commit them. Send the GitLab token only to the configured GitLab URL.
-- Keep the CSP in `renderer/index.html` working: no inline `<script>`, no remote script or style origins. `img-src 'self' data:` is required there and in the capture window: bug thumbnails are served as data URLs.
+- Keep the CSP in `renderer/index.html` working: no inline `<script>`, no remote script or style origins. `img-src 'self' data:` is required there and in the capture window; the capture window also needs `blob:` because its previews come from `URL.createObjectURL`.
 
 ## Checks run headless, not in Electron
 

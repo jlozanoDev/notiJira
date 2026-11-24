@@ -581,8 +581,12 @@ function openModal() {
     els.gitlabUrl.value = state.config.gitlabUrl || '';
     els.gitlabToken.value = state.config.gitlabToken || '';
     applyBugConfigToForm(state.config);
-    state.bugSettingsLoaded = true;
   }
+  // El formulario se muestra completo desde la primera vez: si no hay config
+  // almacenada se pintan los valores por defecto y el atajo capturado se envia
+  // (sin esto, en una instalacion nueva se perdia lo que el usuario eligio).
+  if (!state.config) applyBugConfigToForm(null);
+  state.bugSettingsLoaded = true;
   els.modal.classList.remove('hidden');
   els.baseUrl.focus();
 }

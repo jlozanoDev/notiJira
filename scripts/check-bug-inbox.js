@@ -1005,6 +1005,79 @@ check('S1 reabrir con capture:shown vuelve a leer el contexto', async () => {
   assert.equal(harness.el('issueInput').value, 'CLIN-530');
 });
 
+// --------------------------------------------------------------------------
+// Guardia de los bloqueadores encontrados por la verificacion independiente
+// --------------------------------------------------------------------------
+
+check('S14 un nota.json editado no escribe fuera de su carpeta', async (h) => {
+  const created = await h['bugs:create'](null, { title: 'Traversal' });
+  const notePath = bugFile(created.item.id, 'nota.json');
+  const note = JSON.parse(fs.readFileSync(notePath, 'utf8'));
+  note.id = '../escaped';
+  fs.writeFileSync(notePath, JSON.stringify(note, null, 2));
+
+  const res = await h['bugs:update'](null, { id: created.item.id, changes: { title: 'Editado' } });
+  assert.equal(fs.existsSync(path.join(stub.__userData, 'escaped', 'nota.json')), false, 'la escritura se sale de bugs/<id>/');
+  assert.equal(res.ok, true);
+  assert.equal(res.item.id, created.item.id, 'el id manda la carpeta, no el JSON');
+});
+
+check('S14 bugs:list devuelve el id de la carpeta aunque la nota mienta', async (h) => {
+  const created = await h['bugs:create'](null, { title: 'Id falso' });
+  const notePath = bugFile(created.item.id, 'nota.json');
+  const note = JSON.parse(fs.readFileSync(notePath, 'utf8'));
+  note.id = 'b-19700101000000-ffff';
+  fs.writeFileSync(notePath, JSON.stringify(note, null, 2));
+  const list = await h['bugs:list']();
+  assert.deepEqual(list.items.map((item) => item.id), [created.item.id]);
+});
+
+check('S3 S16 la CSP de la captura permite las miniaturas blob:', async () => {
+  const html = fs.readFileSync(path.join(REPO, 'renderer', 'capture', 'index.html'), 'utf8');
+  const declared = html.match(/img-src([^;]+)/);
+  assert.ok(declared, 'la CSP de la captura declara img-src');
+  // Las miniaturas se crean con URL.createObjectURL: sin blob: Chromium las
+  // rechaza y la ventana parece no guardar las imagenes.
+  assert.match(declared[1], /blob:/);
+});
+
+check('S7 la primera configuracion guarda el atajo capturado', async () => {
+  const harness = createHarness({
+    apiResults: { getConfig: null, saveConfig: { ok: true } },
+  });
+  await harness.advance(0);
+  harness.el('baseUrl').value = 'https://jira.example';
+  harness.el('apiToken').value = 'tok';
+  harness.el('settingsBtn').dispatch('click');
+  await harness.advance(0);
+  assert.equal(harness.el('bugHotkey').value, 'Ctrl+Alt+J', 'sin config guardada muestra el predeterminado');
+
+  harness.el('bugHotkey').dispatch('focus');
+  harness.el('bugHotkey').dispatch('keydown', {
+    key: 'b',
+    code: 'KeyB',
+    ctrlKey: true,
+    altKey: true,
+    shiftKey: false,
+    preventDefault: () => {},
+  });
+  harness.el('configForm').dispatch('submit', { preventDefault: () => {} });
+  await harness.advance(0);
+  const saved = harness.calls.filter((call) => call.name === 'saveConfig').pop();
+  assert.equal(saved.args[0].bugHotkey, 'Control+Alt+B', 'el atajo elegido no se pierde');
+});
+
+check('A2 si escribir config.json falla se restaura el atajo anterior', async (h) => {
+  await h['config:save'](null, { ...baseConfig, bugHotkey: 'Control+Alt+J' });
+  assert.equal(stub.__shortcuts.isRegistered('Control+Alt+J'), true);
+  fs.rmSync(configFilePath(), { force: true, recursive: true });
+  fs.mkdirSync(configFilePath(), { recursive: true }); // un directorio en su sitio hace fallar la escritura
+  const res = await h['config:save'](null, { ...baseConfig, bugHotkey: 'Control+Alt+K' });
+  assert.equal(res.ok, false, 'el guardado informa del fallo');
+  assert.equal(stub.__shortcuts.isRegistered('Control+Alt+K'), false, 'el nuevo no queda activo');
+  assert.equal(stub.__shortcuts.isRegistered('Control+Alt+J'), true, 'vuelve al que estaba');
+});
+
 (async () => {
   let failed = 0;
   try {
