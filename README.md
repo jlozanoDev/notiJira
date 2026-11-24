@@ -4,7 +4,7 @@ Aplicación de escritorio para Windows que vigila Jira y te avisa cuando te menc
 
 ## Descargar
 
-[Descargar NotiJira v1.1.3 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.1.3). En **Assets**, elige `NotiJira.Setup.1.1.3.exe` para instalar o `NotiJira.1.1.3.exe` para usar la versión portable.
+[Descargar NotiJira v1.1.4 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.1.4). En **Assets**, elige `NotiJira.Setup.1.1.4.exe` para instalar o `NotiJira.1.1.4.exe` para usar la versión portable.
 
 ## Ruta rápida
 
