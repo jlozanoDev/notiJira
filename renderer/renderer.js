@@ -52,6 +52,8 @@ const els = {
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
 const READ_IDS_KEY = 'notijira:readIds';
+const SEARCH_DEBOUNCE_MS = 250;
+const SEARCH_MIN_CHARS = 2;
 
 function loadReadIds() {
   try {
@@ -77,6 +79,8 @@ const state = {
   selectedComments: new Set(),
   returnToCopyModal: false,
   gitlabSession: 0,
+  searchTimer: null,
+  searchSeq: 0,
 };
 
 function normalizeBaseUrl(url) {
@@ -623,6 +627,7 @@ function setGitlabMessage(message, type) {
 }
 
 function openSearchModal() {
+  cancelSearch();
   setSearchMessage('', '');
   els.searchResults.innerHTML = '';
   els.searchResults.classList.add('hidden');
@@ -632,7 +637,89 @@ function openSearchModal() {
 }
 
 function closeSearchModal() {
+  cancelSearch();
   els.searchModal.classList.add('hidden');
+}
+
+// Cualquier busqueda pendiente queda invalidada: sube la secuencia para que una
+// respuesta tardia no sobrescriba la lista que se esta mostrando.
+function cancelSearch() {
+  if (state.searchTimer) {
+    clearTimeout(state.searchTimer);
+    state.searchTimer = null;
+  }
+  state.searchSeq += 1;
+}
+
+function clearSearchResults(message, type) {
+  els.searchResults.innerHTML = '';
+  els.searchResults.classList.add('hidden');
+  setSearchMessage(message || '', type || '');
+}
+
+async function runIssueSearch(query) {
+  if (!state.config) {
+    setSearchMessage('Configura Jira primero.', 'error');
+    return;
+  }
+
+  const text = String(query || '').trim();
+  if (text.length < SEARCH_MIN_CHARS) {
+    clearSearchResults(
+      text ? `Escribe al menos ${SEARCH_MIN_CHARS} caracteres.` : '',
+      text ? 'error' : ''
+    );
+    return;
+  }
+
+  cancelSearch();
+  const seq = state.searchSeq;
+  setSearchMessage('Buscando...', '');
+
+  let result;
+  try {
+    result = await window.api.searchIssues(state.config, text);
+  } catch (err) {
+    result = { ok: false, error: err.message };
+  }
+  if (seq !== state.searchSeq) return;
+
+  if (!result.ok) {
+    clearSearchResults('Error: ' + result.error, 'error');
+    return;
+  }
+
+  renderSearchResults(result.results || []);
+  if (result.error) {
+    setSearchMessage(
+      result.error +
+        (result.results && result.results.length ? '' : ' Sin resultados.'),
+      'error'
+    );
+  }
+}
+
+// Sugerencias en vivo: se espera a que el usuario deje de escribir.
+function scheduleIssueSearch() {
+  const text = els.searchInput.value.trim();
+  if (state.searchTimer) {
+    clearTimeout(state.searchTimer);
+    state.searchTimer = null;
+  }
+
+  if (text.length < SEARCH_MIN_CHARS) {
+    cancelSearch();
+    clearSearchResults(
+      text ? `Escribe al menos ${SEARCH_MIN_CHARS} caracteres.` : '',
+      text ? 'error' : ''
+    );
+    return;
+  }
+
+  state.searchTimer = setTimeout(() => {
+    state.searchTimer = null;
+    runIssueSearch(text);
+  }, SEARCH_DEBOUNCE_MS);
 }
 
 function closeCopyModal() {
@@ -1252,36 +1339,10 @@ els.searchModal.addEventListener('click', (e) => {
 
 els.searchForm.addEventListener('submit', async (e) => {
   e.preventDefault();
-  if (!state.config) {
-    setSearchMessage('Configura Jira primero.', 'error');
-    return;
-  }
-  const query = els.searchInput.value.trim();
-  if (!query) {
-    setSearchMessage('Escribe una clave de tarea o una descripcion.', 'error');
-    return;
-  }
-
-  els.searchSubmitBtn.disabled = true;
-  setSearchMessage('Buscando...', '');
-  const result = await window.api.searchIssues(state.config, query);
-  els.searchSubmitBtn.disabled = false;
-
-  if (!result.ok) {
-    els.searchResults.innerHTML = '';
-    els.searchResults.classList.add('hidden');
-    setSearchMessage('Error: ' + result.error, 'error');
-    return;
-  }
-  renderSearchResults(result.results || []);
-  if (result.error) {
-    setSearchMessage(
-      result.error +
-        (result.results && result.results.length ? '' : ' Sin resultados.'),
-      'error'
-    );
-  }
+  await runIssueSearch(els.searchInput.value);
 });
+
+els.searchInput.addEventListener('input', scheduleIssueSearch);
 
 els.selectAllBtn.addEventListener('click', () => {
   const data = state.copyData;

@@ -98,6 +98,7 @@ const server = http.createServer((req, res) => {
     if (url.startsWith('/rest/api/3/myself')) return json({ displayName: 'Yo', accountId: 'acc:1' });
     if (url.startsWith('/rest/api/3/search/jql')) {
       const parsed = JSON.parse(body || '{}');
+      if (/text ~ "ZZZ-404"/.test(parsed.jql)) return json({ issues: [], _jql: parsed.jql });
       return json({ issues: [
         { key: 'AAA-1', id: '1', fields: { summary: 'Primera', status: { name: 'Abierta' }, issuetype: { name: 'Tarea' }, updated: '2026-10-30T10:00:00.000Z' } },
       ], _jql: parsed.jql, _max: parsed.maxResults });
@@ -120,6 +121,7 @@ const server = http.createServer((req, res) => {
       customfield_10448: null, customfield_10251: null, customfield_10481: null,
     } });
     if (url.startsWith('/rest/api/3/issue/ZZZ-1')) return send(404, JSON.stringify({ errorMessages: ['Issue does not exist'] }));
+    if (url.startsWith('/rest/api/3/issue/ZZZ-404')) return send(404, JSON.stringify({ errorMessages: ['Issue does not exist'] }));
     if (url.startsWith('/rest/api/3/issue/FOR-403')) return send(403, JSON.stringify({ errorMessages: ['no permission'] }));
     if (url.startsWith('/rest/api/3/attachment/content/9001')) return send(500, JSON.stringify({ errorMessages: ['boom'] }));
     if (url.startsWith('/rest/api/3/attachment/content/9002')) return send(200, PDF, 'application/pdf');
@@ -160,9 +162,18 @@ check('S1 comillas y barras del texto se escapan en el JQL', async (h, config) =
   assert.strictEqual(body.jql, 'text ~ "foo\\"bar\\\\baz" ORDER BY updated DESC');
 });
 
-check('S1 clave inexistente: se avisa del error y se permite buscar', async (h, config) => {
+check('S1 clave inexistente con coincidencias: busca por texto sin avisar', async (h, config) => {
   const r = await h['jira:searchIssues']({}, { config, query: 'ZZZ-1' });
-  assert.ok(r.ok === false || r.error, 'debe mostrarse el error de la clave inexistente');
+  assert.strictEqual(r.ok, true);
+  assert.ok(r.results.length > 0, 'la busqueda por texto sigue funcionando');
+  assert.ok(!r.error, 'no avisa de la clave cuando el texto encuentra tareas');
+});
+
+check('S1 clave inexistente sin coincidencias: se avisa', async (h, config) => {
+  const r = await h['jira:searchIssues']({}, { config, query: 'ZZZ-404' });
+  assert.strictEqual(r.ok, true);
+  assert.deepStrictEqual(r.results, []);
+  assert.ok(/ZZZ-404 no existe/.test(r.error || ''), r.error);
 });
 
 check('S1 clave sin permiso: el error se propaga a la UI', async (h, config) => {
