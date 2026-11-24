@@ -180,35 +180,40 @@
     </div>
 
     <div id="searchModal" class="modal-overlay hidden">
-      <div class="modal">
+      <div class="modal modal-search">
         <h2>Buscar tarea</h2>
-        <form id="searchForm">
-          <label>
-            Clave o descripcion
-            <input
-              id="searchInput"
-              type="text"
-              placeholder="CLIN-506 o texto de la tarea"
-              autocomplete="off"
-            />
-            <small
-              >Escribe una clave (PROY-123) para abrirla directamente, o parte
-              del resumen o de la descripcion. Las coincidencias aparecen
-              mientras escribes, sin pulsar Buscar.</small
-            >
-          </label>
-          <div id="searchMessage" class="form-message"></div>
-          <div id="searchResults" class="search-results hidden"></div>
-          <div class="modal-actions">
-            <div class="spacer"></div>
-            <button type="button" id="searchCancelBtn" class="btn btn-ghost">
-              Cancelar
-            </button>
-            <button type="submit" id="searchSubmitBtn" class="btn btn-primary">
-              Buscar
-            </button>
-          </div>
-        </form>
+        <div class="combo">
+          <label for="searchInput">Clave o descripcion</label>
+          <input
+            id="searchInput"
+            class="combo-input"
+            type="text"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-controls="searchList"
+            aria-expanded="false"
+            placeholder="CLIN-506 o texto de la tarea"
+            autocomplete="off"
+          />
+          <ul
+            id="searchList"
+            class="combo-list hidden"
+            role="listbox"
+            aria-label="Tareas de Jira"
+          ></ul>
+        </div>
+        <div id="searchMessage" class="form-message"></div>
+        <small class="combo-help"
+          >Escribe al menos 2 caracteres. Una clave completa (PROY-123) abre esa
+          tarea; el resto busca en el resumen, la descripcion y los comentarios.
+          Flechas para moverte, Enter para abrir, Esc para cerrar.</small
+        >
+        <div class="modal-actions">
+          <div class="spacer"></div>
+          <button type="button" id="searchCancelBtn" class="btn btn-ghost">
+            Cerrar
+          </button>
+        </div>
       </div>
     </div>
 

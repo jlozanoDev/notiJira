@@ -13,7 +13,7 @@ This file is the portable contract. `.opencode/instructions.md` (loaded through 
 | ADF→Markdown checks | `npm run check:adf` (13 assertions) |
 | Copy-flow checks (Jira + GitLab) | `npm run check:copy` (34 assertions) |
 | Renderer GitLab checks | `npm run check:renderer` (27 assertions) |
-| Live-search checks | `npm run check:search` (7 assertions) |
+| Live-search checks | `npm run check:search` (10 assertions) |
 | Package unpacked | `npm run pack` |
 | Build installers | `npm run dist` |
 | Serve `dist/` for the updater | `npm run serve:dist` (`PORT`, default 8080) |

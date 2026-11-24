@@ -65,15 +65,17 @@ function withProjects(...overrides) {
 // The combobox markup pairs "<field>Input" with "<field>List".
 const listFor = (inputId) => inputId.replace('Input', 'List');
 
-// Opens the copy modal through the public path: search -> click the result.
+// Opens the copy modal through the public path: type in the Jira combobox and
+// choose the first suggestion with the keyboard, exactly like a user would.
 async function openCopyModalFlow(harness) {
   await settle(harness);
-  harness.el('searchInput').value = 'AAA-1';
-  harness.el('searchForm').dispatch('submit');
+  const input = harness.el('searchInput');
+  input.value = 'AAA-1';
+  input.dispatch('input');
   await settle(harness);
-  const rows = harness.el('searchResults').children;
+  const rows = harness.el('searchList').children;
   assert.ok(rows.length > 0, 'el buscador de Jira debe listar un resultado');
-  rows[0].dispatch('click');
+  rows[0].dispatch('mousedown', { preventDefault: () => {} });
   await settle(harness);
 }
 

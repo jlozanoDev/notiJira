@@ -1,7 +1,8 @@
 'use strict';
-// Headless regression checks for the live suggestions of the Jira search modal.
+// Headless regression checks for the Jira search combobox in the search modal.
 // Runs the real renderer/renderer.js against the DOM harness with a fake clock,
-// so the debounce and the stale-response guard are asserted deterministically.
+// so the debounce, the keyboard navigation and the stale-response guard are
+// asserted deterministically.
 // Run with: npm run check:search   (node + assert, no test framework).
 const assert = require('assert');
 const { createHarness } = require('./test-support/renderer-stub');
@@ -10,7 +11,7 @@ const checks = [];
 const check = (name, fn) => checks.push({ name, fn });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-// The renderer debounces the suggestions at 250 ms; checks advance a fake clock.
+// The combobox debounces the queries at 250 ms; checks advance a fake clock.
 const DEBOUNCE = 250;
 const settle = async (harness, ms = DEBOUNCE + 70) => {
   for (let i = 0; i < 3; i++) await tick();
@@ -30,14 +31,14 @@ const result = (key) => ({
 const SEARCH_OK = { ok: true, results: [result('AAA-1')] };
 
 const callNames = (harness, name) => harness.calls.filter((call) => call.name === name);
-const resultRows = (harness) => harness.el('searchResults').children;
-const resultsHidden = (harness) => harness.isHidden('searchResults');
-const firstKey = (harness) => resultRows(harness)[0].children[0].textContent;
+const options = (harness) => harness.el('searchList').children;
+const listHidden = (harness) => harness.isHidden('searchList');
+const message = (harness) => harness.el('searchMessage').textContent;
 
 async function openSearch(harness) {
   await settle(harness);
   harness.el('searchBtn').dispatch('click');
-  await settle(harness);
+  await settle(harness, 0);
 }
 
 async function type(harness, text) {
@@ -57,16 +58,24 @@ async function typeFast(harness, texts) {
   await settle(harness);
 }
 
-check('una sola letra no consulta a Jira', async () => {
+function press(harness, name) {
+  harness.el('searchInput').dispatch('keydown', {
+    key: name,
+    preventDefault: () => {},
+  });
+}
+
+check('menos de 2 caracteres no consulta a Jira y mantiene la lista cerrada', async () => {
   const h = createHarness({ apiResults: { searchIssues: SEARCH_OK } });
   await openSearch(h);
   await type(h, 'A');
 
-  assert.strictEqual(callNames(h, 'searchIssues').length, 0, 'no debe pedir sugerencias con 1 caracter');
-  assert.ok(resultsHidden(h), 'la lista de resultados sigue oculta');
+  assert.strictEqual(callNames(h, 'searchIssues').length, 0, 'no consulta con 1 caracter');
+  assert.ok(listHidden(h), 'la lista sigue oculta');
+  assert.ok(/al menos 2/.test(message(h)), 'explica el minimo de caracteres');
 });
 
-check('escribir sugiere tareas sin pulsar Buscar', async () => {
+check('escribir abre el combo con las coincidencias de Jira', async () => {
   const h = createHarness({ apiResults: { searchIssues: SEARCH_OK } });
   await openSearch(h);
   await type(h, 'CLIN');
@@ -74,8 +83,12 @@ check('escribir sugiere tareas sin pulsar Buscar', async () => {
   const calls = callNames(h, 'searchIssues');
   assert.strictEqual(calls.length, 1, 'una sola consulta tras el debounce');
   assert.strictEqual(calls[0].args[1], 'CLIN', 'consulta el texto escrito');
-  assert.ok(!resultsHidden(h), 'la lista de opciones se muestra');
-  assert.strictEqual(resultRows(h).length, 1, 'muestra una opción');
+  assert.ok(!listHidden(h), 'el combo se despliega');
+  assert.strictEqual(options(h).length, 1, 'muestra una opcion');
+
+  const option = options(h)[0];
+  assert.strictEqual(option.children[0].textContent, 'AAA-1', 'muestra la clave');
+  assert.strictEqual(option.children[1].textContent, 'Tarea AAA-1', 'muestra el resumen');
 });
 
 check('el debounce agrupa las pulsaciones seguidas', async () => {
@@ -84,26 +97,15 @@ check('el debounce agrupa las pulsaciones seguidas', async () => {
   await typeFast(h, ['cl', 'cli', 'clin', 'clini']);
 
   const calls = callNames(h, 'searchIssues');
-  assert.strictEqual(calls.length, 1, 'solo la última pulsación consulta');
+  assert.strictEqual(calls.length, 1, 'solo la ultima pulsacion consulta');
   assert.strictEqual(calls[0].args[1], 'clini');
-});
-
-check('vaciar el campo limpiar la lista de opciones', async () => {
-  const h = createHarness({ apiResults: { searchIssues: SEARCH_OK } });
-  await openSearch(h);
-  await type(h, 'CLIN');
-  await type(h, '');
-
-  assert.ok(resultsHidden(h), 'la lista se oculta');
-  assert.strictEqual(resultRows(h).length, 0, 'no quedan opciones');
 });
 
 check('una respuesta lenta no pisa a la mas reciente', async () => {
   const pending = [];
   const h = createHarness({
     apiResults: {
-      searchIssues: (config, query) =>
-        new Promise((resolve) => pending.push({ query, resolve })),
+      searchIssues: (config, query) => new Promise((resolve) => pending.push({ query, resolve })),
     },
   });
   await openSearch(h);
@@ -116,38 +118,85 @@ check('una respuesta lenta no pisa a la mas reciente', async () => {
   pending[0].resolve({ ok: true, results: [result('CCC-3')] });
   await settle(h, 0);
 
-  assert.strictEqual(resultRows(h).length, 1, 'queda una sola lista');
-  assert.strictEqual(firstKey(h), 'BBB-2', 'se conserva la respuesta mas reciente');
+  assert.strictEqual(options(h).length, 1, 'queda una sola lista');
+  assert.strictEqual(options(h)[0].children[0].textContent, 'BBB-2', 'se conserva la ultima');
 });
 
-check('el boton Buscar consulta de inmediato y abre la copia', async () => {
+check('sin coincidencias se ve el aviso del combo', async () => {
+  const h = createHarness({ apiResults: { searchIssues: { ok: true, results: [] } } });
+  await openSearch(h);
+  await type(h, 'zzzz');
+
+  assert.ok(!listHidden(h), 'el combo sigue desplegado');
+  assert.strictEqual(options(h).length, 1, 'muestra una fila de aviso');
+  assert.strictEqual(options(h)[0].textContent, 'Sin coincidencias');
+  assert.ok(/Sin coincidencias/.test(message(h)), 'el mensaje ayuda a reformular');
+});
+
+check('flechas y Enter abren la tarea marcada', async () => {
   const h = createHarness({ apiResults: { searchIssues: SEARCH_OK } });
   await openSearch(h);
-  h.el('searchInput').value = 'AAA-1';
-  h.el('searchForm').dispatch('submit');
+  await type(h, 'CLIN');
+
+  press(h, 'ArrowDown');
   await settle(h, 0);
+  assert.ok(options(h)[0].classList.contains('active'), 'la primera opcion queda activa');
 
-  assert.strictEqual(callNames(h, 'searchIssues').length, 1, 'consulta sin esperar el debounce');
-  assert.strictEqual(resultRows(h).length, 1);
-
-  resultRows(h)[0].dispatch('click');
+  press(h, 'Enter');
   await settle(h);
 
-  assert.ok(!h.isHidden('copyModal'), 'el clic abre el modal de copia');
+  assert.ok(listHidden(h), 'el combo se cierra');
+  assert.ok(!h.isHidden('copyModal'), 'se abre la modal de copia');
   const copyCalls = callNames(h, 'getIssueCopyData');
   assert.strictEqual(copyCalls[copyCalls.length - 1].args[1], 'AAA-1', 'copia la tarea elegida');
 });
 
-check('un error de Jira se muestra sin romper la lista', async () => {
-  const h = createHarness({ apiResults: { searchIssues: { ok: false, error: 'Jira respondio 401' } } });
+check('clic en una opcion abre la tarea', async () => {
+  const h = createHarness({ apiResults: { searchIssues: SEARCH_OK } });
+  await openSearch(h);
+  await type(h, 'CLIN');
+  options(h)[0].dispatch('mousedown', { preventDefault: () => {} });
+  await settle(h);
+
+  assert.ok(!h.isHidden('copyModal'), 'el clic abre la modal de copia');
+  assert.strictEqual(h.el('searchInput').value, '', 'el campo queda limpio al cerrar');
+});
+
+check('Esc cierra la lista y conserva lo escrito', async () => {
+  const h = createHarness({ apiResults: { searchIssues: SEARCH_OK } });
+  await openSearch(h);
+  await type(h, 'CLIN');
+  press(h, 'Escape');
+  await settle(h, 0);
+
+  assert.ok(listHidden(h), 'la lista se oculta');
+  assert.strictEqual(h.el('searchInput').value, 'CLIN', 'no borra el texto');
+});
+
+check('un error de Jira se muestra en el mensaje', async () => {
+  const h = createHarness({
+    apiResults: { searchIssues: { ok: false, error: 'Jira respondio 401' } },
+  });
   await openSearch(h);
   await type(h, 'CLIN');
 
-  assert.ok(resultsHidden(h), 'no muestra opciones');
-  assert.ok(
-    h.el('searchMessage').textContent.includes('401'),
-    'el mensaje explica el fallo de Jira'
-  );
+  assert.ok(listHidden(h), 'no muestra opciones');
+  assert.ok(/401/.test(message(h)), 'el mensaje explica el fallo de Jira');
+});
+
+check('reabrir el buscador parte de cero', async () => {
+  const h = createHarness({ apiResults: { searchIssues: SEARCH_OK } });
+  await openSearch(h);
+  await type(h, 'CLIN');
+  h.el('searchCancelBtn').dispatch('click');
+  await settle(h, 0);
+  assert.ok(h.isHidden('searchModal'), 'la modal se cierra');
+
+  h.el('searchBtn').dispatch('click');
+  await settle(h, 0);
+  assert.strictEqual(h.el('searchInput').value, '', 'el campo vuelve vacio');
+  assert.ok(listHidden(h), 'la lista vuelve cerrada');
+  assert.strictEqual(options(h).length, 0, 'sin opciones viejas');
 });
 
 (async () => {
@@ -161,7 +210,7 @@ check('un error de Jira se muestra sin romper la lista', async () => {
       console.log('  FAIL- ' + c.name + ' :: ' + (err && err.message));
     }
   }
-  console.log(`SEARCH SUGGESTIONS CHECKS: ${checks.length - failed}/${checks.length} passed`);
+  console.log(`SEARCH COMBO CHECKS: ${checks.length - failed}/${checks.length} passed`);
   process.exitCode = failed ? 1 : 0;
 })().catch((err) => {
   console.error('CHECK FALLA:', err && err.stack);
