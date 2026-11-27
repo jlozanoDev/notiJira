@@ -1,7 +1,8 @@
 {
-  "name": "notijira",
+  "name": "destajo",
+  "productName": "desTajo",
   "version": "1.2.0",
-  "description": "Aplicacion Electron para ver las notificaciones de Jira",
+  "description": "Herramientas de desarrollo: avisos de menciones de Jira, copia de tareas a Markdown y captura rapida de incidencias",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -12,13 +13,14 @@
     "check:copy": "node scripts/check-copy-flow.js",
     "check:renderer": "node scripts/check-renderer-gitlab.js",
     "check:search": "node scripts/check-search-suggestions.js",
-    "check:bugs": "node scripts/check-bug-inbox.js"
+    "check:bugs": "node scripts/check-bug-inbox.js",
+    "check:rename": "node scripts/check-rename-migration.js"
   },
   "author": "",
   "license": "MIT",
   "build": {
-    "appId": "com.notijira.app",
-    "productName": "NotiJira",
+    "appId": "com.destajo.app",
+    "productName": "desTajo",
     "directories": {
       "output": "dist"
     },
@@ -49,7 +51,7 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "NotiJira"
+      "shortcutName": "desTajo"
     }
   },
   "devDependencies": {

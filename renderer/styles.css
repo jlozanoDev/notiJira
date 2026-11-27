@@ -8,6 +8,8 @@
   --text-dim: #5e6c84;
   --text-subtle: #6b778c;
   --primary: #0052cc;
+  --brand: #f59e0b;
+  --brand-ink: #101828;
   --primary-hover: #0747a6;
   --primary-pressed: #0747a6;
   --link: #0052cc;
@@ -65,13 +67,14 @@ body {
 .logo {
   width: 32px;
   height: 32px;
-  border-radius: 3px;
-  background: var(--primary);
-  color: #fff;
+  border-radius: 8px;
+  background: var(--brand);
+  color: var(--brand-ink);
   display: grid;
   place-items: center;
-  font-weight: 700;
-  font-size: 18px;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: -0.5px;
   font-family: "Segoe UI", sans-serif;
 }
 

@@ -1,4 +1,4 @@
-# NotiJira — project instructions
+# desTajo — project instructions
 
 Deep reference for work in this repository. `AGENTS.md` holds the short contract; this file holds the map and the traps.
 
@@ -110,7 +110,7 @@ The app is also a scratch pad for bugs found while developing. It never writes t
 ## Traps
 
 - `stripHtml` and `decodeHtml` in `renderer.js` parse remote HTML by assigning to `innerHTML` on a detached element. It does not execute scripts there, but it can load resources. If you extend text extraction, prefer `DOMParser` and never move that parsing into the live DOM.
-- `read` from the main process comes from a 24-hour freshness window and is ignored by the renderer. The real read state is `notijira:readIds` in `localStorage`, keyed by notification `id`.
+- `read` from the main process comes from a 24-hour freshness window and is ignored by the renderer. The real read state is `destajo:readIds` in `localStorage`, keyed by notification `id`.
 - `state.seenIds` drives the sound and the desktop notification for new mentions. It resets on config save so a fresh connection does not fire a burst of alerts.
 - `backgroundThrottling: false` keeps the 5-minute poll and the 6-hour update check alive while the window is hidden. Removing it silently breaks the core promise of the app.
 - The updater only runs when `app.isPackaged`. Skipping `checkForUpdates` in development is intentional.
@@ -125,7 +125,7 @@ The app is also a scratch pad for bugs found while developing. It never writes t
 
 ## Packaging
 
-- `appId` is `com.notijira.app` and `productName` is `NotiJira`; `app.setAppUserModelId` must stay in sync on Windows or notifications lose their identity.
+- `appId` is `com.destajo.app` and `productName` is `desTajo`; `app.setAppUserModelId` must stay in sync on Windows or notifications lose their identity.
 - Windows targets: `nsis` (assisted install, per-user) and `portable`.
 - Output goes to `dist/`, which is git-ignored.
 

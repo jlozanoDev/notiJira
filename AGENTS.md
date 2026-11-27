@@ -1,6 +1,6 @@
 # AGENTS.md
 
-NotiJira is a single-window Electron app that watches Jira and notifies the user when they are mentioned in a comment, plus a "copy task to Markdown" flow with optional GitLab branch diffs. Plain CommonJS, no bundler, no TypeScript.
+desTajo (formerly NotiJira) is a single-window Electron app that watches Jira and notifies the user when they are mentioned in a comment, plus a "copy task to Markdown" flow with optional GitLab branch diffs and a local bug inbox. Plain CommonJS, no bundler, no TypeScript.
 
 This file is the portable contract. `.opencode/instructions.md` (loaded through `opencode.json`) holds the architecture map, the IPC contract, and the known traps; restart OpenCode after editing it.
 
@@ -15,12 +15,13 @@ This file is the portable contract. `.opencode/instructions.md` (loaded through 
 | Renderer GitLab checks | `npm run check:renderer` (27 assertions) |
 | Live-search checks | `npm run check:search` (10 assertions) |
 | Bug inbox checks (capture, storage, tray) | `npm run check:bugs` (45 assertions) |
+| Rename migration checks (user data, read state) | `npm run check:rename` (7 assertions) |
 | Package unpacked | `npm run pack` |
 | Build installers | `npm run dist` |
 | Serve `dist/` for the updater | `npm run serve:dist` (`PORT`, default 8080) |
 | Regenerate icons | `npx electron scripts/make-icon.js` |
 
-There is no `npm test`, no test framework, and no linter. The five `check:*` scripts are plain Node + `assert`: run them after touching `adf.js`, the copy flow, the GitLab part of the copy modal, the Jira search combobox, or anything in the bug inbox (`main.js` handlers, `renderer/capture/`, the bug modal in the main window). Everything else is verified by running the app.
+There is no `npm test`, no test framework, and no linter. The six `check:*` scripts are plain Node + `assert`: run them after touching `adf.js`, the copy flow, the GitLab part of the copy modal, the Jira search combobox, anything in the bug inbox (`main.js` handlers, `renderer/capture/`, the bug modal in the main window), or the user data migration. Everything else is verified by running the app.
 
 ## Layout
 
@@ -34,11 +35,12 @@ There is no `npm test`, no test framework, and no linter. The five `check:*` scr
 | `scripts/` | `serve-dist.js`, `make-icon.js`, and the `check-*.js` regression scripts |
 | `scripts/test-support/` | `electron-stub.js` and `renderer-stub.js`, used only by the checks |
 | `odd/tasks/` | Feature documents holding the specs the `check:*` assertions encode |
-| `assets/` | `icon.ico`, `icon.png`, and the `jira.svg` source |
+| `assets/` | `icon.ico`, `icon.png`, and the `destajo.svg` source |
 
 ## Hard rules
 
 - Never enable `nodeIntegration` or disable `contextIsolation`. Renderer code reaches the main process only through `window.api` in `preload.js`.
+- The visible name is `desTajo` (lowercase `des`, capital `T`) in every surface: top-level `productName`, `build.productName`, `nsis.shortcutName`, window and tray text, notifications, docs. `name` in `package.json` and `appId` stay lowercase (`destajo`, `com.destajo.app`) because they are identifiers, not the written name.
 - A new renderer capability needs three edits together: an `ipcMain.handle` in `main.js`, a method in `preload.js`, and the call site in `renderer/renderer.js`. The capture window has its own surface (`renderer/capture/capture-preload.js`) and its own CSP: a channel used only there belongs there, not in `preload.js`.
 - Anything shipped at runtime must be listed in `build.files` in `package.json` — `adf.js` is there for that reason. An unlisted runtime file is absent from the packaged app with no error.
 - Treat all Jira and GitLab content as untrusted. Build DOM with `createElement` + `textContent`; never interpolate remote data into `innerHTML`.
@@ -61,7 +63,7 @@ Need manual verification against a real Jira instance:
 - GitLab requests reject redirects so `PRIVATE-TOKEN` cannot leak, and the branch comparison sends the target branch as `from` and the source as `to`.
 - The copy flow reuses one cached issue payload for 10 minutes: `jira:issueCopyData` fills it and `copy:issue` reads it, so the two must agree on the issue key.
 - `configureUpdater` — a wrong feed URL stops updates silently.
-- Read state is owned by the renderer (`localStorage`, key `notijira:readIds`), not by the main process.
+- Read state is owned by the renderer (`localStorage`, key `destajo:readIds`), not by the main process.
 
 Need manual verification on a real desktop (the OS owns them, the checks can only fake them):
 

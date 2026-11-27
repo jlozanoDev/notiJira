@@ -1,8 +1,10 @@
-# NotiJira
+# desTajo
 
-Aplicación de escritorio para Windows que vigila Jira y te avisa cuando te mencionan en un comentario, y que además te deja apuntar un bug en segundos mientras desarrollas, con imágenes y enlaces, para crear la tarea después. Todo corre en local: sin servidor propio, sin telemetría y sin cuentas adicionales.
+desTajo (antes **NotiJira**) es una aplicación de escritorio para Windows con herramientas para el día a día del desarrollo: vigila Jira y te avisa cuando te mencionan en un comentario, copia una tarea a Markdown con el diff de GitLab, y te deja apuntar un bug en segundos mientras trabajas, con imágenes y enlaces, para crear la tarea después. Todo corre en local: sin servidor propio, sin telemetría y sin cuentas adicionales.
 
 ## Descargar
+
+Hasta la versión 1.2.0 la aplicación se llamó **NotiJira**. A partir del renombrado, los instaladores se publican como `desTajo Setup <versión>.exe` y `desTajo <versión>.exe`.
 
 [Descargar NotiJira v1.2.0 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.2.0). En **Assets**, elige `NotiJira.Setup.1.2.0.exe` para instalar o `NotiJira.1.2.0.exe` para usar la versión portable.
 
@@ -83,14 +85,15 @@ El atajo es configurable: en **Configuracion → Captura rapida** pulsas la comb
 | `npm run check:renderer` | Comprueba la parte de GitLab de la modal de copia con el `renderer.js` real y un DOM simulado (27 aserciones) |
 | `npm run check:search` | Comprueba el combo de búsqueda de Jira con el `renderer.js` real y un reloj simulado (10 aserciones) |
 | `npm run check:bugs` | Comprueba la captura, el almacenamiento local y la bandeja de incidencias con los stubs headless (45 aserciones) |
+| `npm run check:rename` | Comprueba que el renombrado conserva la configuración, las incidencias y las copias anteriores (7 aserciones) |
 | `npm run serve:dist` | Sirve `dist/` por HTTP para el actualizador. Usa `PORT` (por defecto 8080) |
-| `npx electron scripts/make-icon.js` | Regenera `assets/icon.png` y `assets/icon.ico` desde `assets/jira.svg` |
+| `npx electron scripts/make-icon.js` | Regenera `assets/icon.png` y `assets/icon.ico` desde `assets/destajo.svg` |
 
 ## Generar el instalador
 
-`npm run dist` genera en `dist/` el instalador `NotiJira Setup <versión>.exe` (NSIS, asistido y por usuario) y la versión portable `NotiJira <versión>.exe`. Antes de compilarlo, actualiza `version` en `package.json` y `package-lock.json`.
+`npm run dist` genera en `dist/` el instalador `desTajo Setup <versión>.exe` (NSIS, asistido y por usuario) y la versión portable `desTajo <versión>.exe`. Antes de compilarlo, actualiza `version` en `package.json` y `package-lock.json`.
 
-Al subir esos archivos a una release de GitHub, la plataforma reemplaza los espacios del nombre por puntos: `NotiJira Setup <versión>.exe` pasa a ser `NotiJira.Setup.<versión>.exe`. Enlázalos ya con ese nombre.
+Al subir esos archivos a una release de GitHub, la plataforma reemplaza los espacios del nombre por puntos: `desTajo Setup <versión>.exe` pasa a ser `desTajo.Setup.<versión>.exe`. Enlázalos ya con ese nombre.
 
 En Windows hay **un requisito del sistema**: al preparar sus herramientas, electron-builder extrae un archivador que contiene enlaces simbólicos. Si tu usuario no tiene privilegio para crearlos, el build falla siempre con:
 
@@ -129,7 +132,7 @@ Si el campo queda vacío, se usa la URL de `build.publish` de `package.json`. La
 
 ## Limitaciones conocidas
 
-- No hay framework de tests ni linter. Los scripts `check:adf`, `check:copy`, `check:renderer`, `check:search` y `check:bugs` son regresiones headless con Node y `assert`; el resto se verifica a mano ejecutando la app.
+- No hay framework de tests ni linter. Los scripts `check:adf`, `check:copy`, `check:renderer`, `check:search`, `check:bugs` y `check:rename` son regresiones headless con Node y `assert`; el resto se verifica a mano ejecutando la app.
 - El atajo global, la bandeja y el arranque con Windows los gestiona el sistema operativo: su lógica está cubierta por `check:bugs`, pero el comportamiento real (otra app en foco, el icono en el reloj) se comprueba a mano.
 - Las incidencias son locales a cada equipo, en `bugs/<identificador>/`: no se sincronizan, no se suben a ningún sitio y la app no crea tareas en Jira.
 - Jira Cloud no expone un feed de notificaciones fiable, así que la app escanea comentarios: hasta 100 issues y 10 páginas de comentarios por issue.
