@@ -1,18 +1,10 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <!-- Marca de desTajo: la inicial D atravesada por un tajo.
-       El corte es una ranura limpia del color del fondo, sin desplazar las
-       mitades: a tamano de bandeja la silueta sigue leyendose como una D. -->
-  <defs>
-    <mask id="tajo">
-      <rect width="512" height="512" fill="#fff"/>
-      <line x1="-60" y1="572" x2="572" y2="-60" stroke="#000" stroke-width="30"/>
-    </mask>
-  </defs>
+  <!-- Marca de desTajo: la d y la T comparten el asta.
+       La barra superior es el tajo: la T corta la composicion por arriba. -->
   <rect width="512" height="512" rx="104" fill="#f59e0b"/>
-  <path
-    mask="url(#tajo)"
-    fill-rule="evenodd"
-    fill="#101828"
-    d="M137 96H205A170 160 0 0 1 205 416H137Z M205 168A102 88 0 0 1 205 344Z"
-  />
+  <g fill="#101828">
+    <circle cx="198" cy="308" r="80" fill="none" stroke="#101828" stroke-width="52"/>
+    <rect x="284" y="96" width="56" height="318"/>
+    <rect x="204" y="96" width="216" height="56"/>
+  </g>
 </svg>
