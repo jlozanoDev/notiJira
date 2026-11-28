@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('gitlab:projects', { config, search }),
   getGitlabBranches: (config, projectId, search) =>
     ipcRenderer.invoke('gitlab:branches', { config, projectId, search }),
+  getGithubRepos: (config, search) =>
+    ipcRenderer.invoke('github:repos', { config, search }),
+  getGithubBranches: (config, repo, search) =>
+    ipcRenderer.invoke('github:branches', { config, repo, search }),
   searchIssues: (config, query) =>
     ipcRenderer.invoke('jira:searchIssues', { config, query }),
   getIssueCopyData: (config, issueKey) =>
