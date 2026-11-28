@@ -27,11 +27,12 @@ const server = http.createServer((req, res) => {
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const url = req.url;
+    const authHeader = req.headers['authorization'] || '';
     requests.push({
       method: req.method,
       url,
       body: body || null,
-      privateToken: req.headers['private-token'] || '',
+      privateToken: req.headers['private-token'] || authHeader || '',
     });
     const send = (code, b, t) => { res.writeHead(code, { 'Content-Type': t || 'application/json' }); res.end(b); };
     const json = (o) => send(200, JSON.stringify(o));
@@ -93,6 +94,70 @@ const server = http.createServer((req, res) => {
     }
     if (url.startsWith('/api/v4/projects/404/')) {
       return send(404, JSON.stringify({ message: 'Project not found' }));
+    }
+    // GitHub API endpoints
+    if (url.startsWith('/user/repos') || url.startsWith('/user/repos?')) {
+      const auth = req.headers['authorization'] || '';
+      if (!auth.startsWith('Bearer ')) return send(401, JSON.stringify({ message: 'Bad credentials' }));
+      if (req.headers['authorization'] === 'Bearer redirect-test-token') {
+        res.writeHead(302, { Location: '/redirect-target' });
+        res.end();
+        return;
+      }
+      const params = new URL(url, 'http://localhost').searchParams;
+      const term = (params.get('search') || '').toLowerCase();
+      if (term === 'muchos') {
+        const many = [];
+        for (let i = 0; i < 100; i++) {
+          many.push({ id: 500 + i, name: `repo-${i}`, full_name: `owner/repo-${i}`, default_branch: 'main' });
+        }
+        return json(many);
+      }
+      const pool = [
+        { id: 101, name: 'destajo', full_name: 'jlozanoDev/destajo', default_branch: 'main' },
+        { id: 102, name: 'chaty', full_name: 'jlozanoDev/chaty', default_branch: 'develop' },
+      ];
+      return json(pool.filter((r) => !term || r.full_name.toLowerCase().includes(term)));
+    }
+    if (url.startsWith('/repos/jlozanoDev/destajo/branches') || url.startsWith('/repos/jlozanoDev/destajo/branches?')) {
+      const auth = req.headers['authorization'] || '';
+      if (!auth.startsWith('Bearer ')) return send(401, JSON.stringify({ message: 'Bad credentials' }));
+      const params = new URL(url, 'http://localhost').searchParams;
+      const term = (params.get('search') || '').toLowerCase();
+      if (term === 'muchas') {
+        const many = [];
+        for (let i = 0; i < 100; i++) many.push({ name: `branch-${i}` });
+        return json(many);
+      }
+      const pool = [
+        { name: 'main' },
+        { name: 'develop' },
+        { name: 'AAA-1' },
+        { name: 'feature/AAA-1-fix' },
+        { name: 'feature/pr-diff' },
+      ];
+      return json(pool.filter((b) => !term || b.name.toLowerCase().includes(term)));
+    }
+    if (url.startsWith('/repos/jlozanoDev/destajo/compare/')) {
+      const auth = req.headers['authorization'] || '';
+      if (!auth.startsWith('Bearer ')) return send(401, JSON.stringify({ message: 'Bad credentials' }));
+      const parts = url.split('/compare/')[1];
+      const [base, head] = parts.split('...');
+      const decodedHead = decodeURIComponent(head);
+      const decodedBase = decodeURIComponent(base);
+      console.log('[SERVER DEBUG] GitHub compare:', 'base=', decodedBase, 'head=', decodedHead);
+      if (decodedHead === 'feature/empty') return send(200, '', 'text/plain');
+      if (decodedHead === 'feature/timeout') return send(500, JSON.stringify({ message: 'Server Error' }));
+      if (decodedHead === 'feature/overflow') {
+        // Generate a diff larger than 1MB to trigger the size limit check
+        return send(200, 'diff --git a/src/app.js b/src/app.js\n--- a/src/app.js\n+++ b/src/app.js\n@@ -1 +1 @@\n-old\n+new\n' + 'x'.repeat(1500000), 'text/plain');
+      }
+      return send(200, 'diff --git a/src/app.js b/src/app.js\n--- a/src/app.js\n+++ b/src/app.js\n@@ -1 +1 @@\n-old\n+new', 'text/plain');
+    }
+    if (url.startsWith('/repos/jlozanoDev/chaty/compare/')) {
+      const auth = req.headers['authorization'] || '';
+      if (!auth.startsWith('Bearer ')) return send(401, JSON.stringify({ message: 'Bad credentials' }));
+      return send(200, 'diff --git a/README.md b/README.md\n--- a/README.md\n+++ b/README.md\n@@ -1 +1 @@\n-old\n+new', 'text/plain');
     }
     if (url.startsWith('/rest/api/3/notifications')) return json({ values: [] });
     if (url.startsWith('/rest/api/3/myself')) return json({ displayName: 'Yo', accountId: 'acc:1' });
@@ -607,6 +672,274 @@ check('S7 no se envian parametros que la spec no pide', async (h, config) => {
   }
 });
 
+// --- GitHub: credenciales, busqueda y diff -----------------------------------
+check('GitHub credentials are saved, returned, and removable without losing Jira config', async (h, config) => {
+  const savedConfig = {
+    ...config,
+    email: 'jira@example.com',
+    githubToken: 'gh-test-token',
+  };
+  assert.deepStrictEqual(await h['config:save']({}, savedConfig), { ok: true });
+  const persisted = JSON.parse(fs.readFileSync(path.join(stub.__userData, 'config.json'), 'utf8'));
+  assert.strictEqual(persisted.githubToken, 'gh-test-token');
+  assert.strictEqual(persisted.githubUrl, 'https://api.github.com');
+  assert.strictEqual((await h['config:get']()).githubToken, 'gh-test-token');
+  assert.strictEqual((await h['config:get']()).githubUrl, 'https://api.github.com');
+
+  assert.deepStrictEqual(await h['config:save']({}, {
+    ...savedConfig,
+    githubToken: '',
+    githubUrl: '',
+  }), { ok: true });
+  const removed = await h['config:get']();
+  assert.strictEqual(removed.githubToken, '');
+  assert.strictEqual(removed.githubUrl, '');
+  assert.strictEqual(removed.apiToken, config.apiToken, 'Jira token must remain intact');
+});
+
+check('config:save rejects a bad GitHub URL without throwing or discarding Jira config', async (h, config) => {
+  // First save a valid GitHub config
+  assert.deepStrictEqual(await h['config:save']({}, {
+    ...config,
+    githubUrl: 'https://github.example.com',
+    githubToken: 'gh-test-token',
+  }), { ok: true });
+
+  const result = await h['config:save']({}, {
+    baseUrl: 'https://nuevo-jira.example.com',
+    email: '',
+    apiToken: 'otro-token',
+    updateUrl: '',
+    githubUrl: 'http://no-local.example.com',
+    githubToken: 'gh-test-token',
+  });
+  assert.strictEqual(result.ok, false, 'invalid GitHub URL must be reported, not thrown');
+  assert.match(result.error, /HTTPS/);
+  const after = await h['config:get']();
+  assert.strictEqual(after.baseUrl, config.baseUrl);
+  assert.strictEqual(after.apiToken, config.apiToken);
+  assert.strictEqual(after.githubUrl, 'https://github.example.com');
+  assert.strictEqual(after.githubToken, 'gh-test-token');
+});
+
+check('config:save rejects a malformed GitHub URL', async (h, config) => {
+  const r = await h['config:save']({}, { ...config, githubUrl: 'not-a-url', githubToken: 'gh-test-token' });
+  assert.strictEqual(r.ok, false);
+  assert.match(r.error, /valida/);
+});
+
+check('GitHub repositories and branches are fetched with the configured token', async (h, config) => {
+  const githubConfig = { ...config, githubUrl: config.baseUrl, githubToken: 'gh-test-token' };
+  const repos = await h['github:repos']({}, { config: githubConfig, search: 'destajo' });
+  assert.strictEqual(repos.ok, true, repos.error);
+  assert.deepStrictEqual(repos.repos.map((r) => r.fullName), ['jlozanoDev/destajo']);
+  const branches = await h['github:branches']({}, { config: githubConfig, repo: 'jlozanoDev/destajo', search: 'feature' });
+  assert.strictEqual(branches.ok, true, branches.error);
+  assert.deepStrictEqual(branches.branches.map((b) => b.name), ['feature/AAA-1-fix', 'feature/pr-diff']);
+});
+
+check('S7 github:repos sends the server-side search and reports a full page', async (h, config) => {
+  requests = [];
+  const githubConfig = { ...config, githubUrl: config.baseUrl, githubToken: 'gh-test-token' };
+  const result = await h['github:repos']({}, { config: githubConfig, search: 'destajo' });
+  assert.strictEqual(result.ok, true, result.error);
+  assert.deepStrictEqual(result.repos.map((r) => r.fullName), ['jlozanoDev/destajo']);
+  const calls = requests.filter((request) => request.url.startsWith('/user/repos?'));
+  assert.strictEqual(calls.length, 1, 'una sola peticion por busqueda');
+  const params = new URL(calls[0].url, 'http://localhost').searchParams;
+  assert.strictEqual(params.get('search'), 'destajo');
+  assert.strictEqual(params.get('page'), '1');
+  assert.strictEqual(params.get('per_page'), '100');
+  assert.strictEqual(result.truncated, false);
+});
+
+check('S7 github:branches sends search for the selected repo only', async (h, config) => {
+  requests = [];
+  const githubConfig = { ...config, githubUrl: config.baseUrl, githubToken: 'gh-test-token' };
+  const result = await h['github:branches']({}, { config: githubConfig, repo: 'jlozanoDev/destajo', search: 'feature' });
+  assert.strictEqual(result.ok, true, result.error);
+  assert.deepStrictEqual(result.branches.map((b) => b.name), ['feature/AAA-1-fix', 'feature/pr-diff']);
+  const calls = requests.filter((request) => request.url.startsWith('/repos/jlozanoDev/destajo/branches?'));
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(new URL(calls[0].url, 'http://localhost').searchParams.get('search'), 'feature');
+});
+
+check('S7 una pagina completa se marca como truncada sin pedir la siguiente (GitHub)', async (h, config) => {
+  requests = [];
+  const githubConfig = { ...config, githubUrl: config.baseUrl, githubToken: 'gh-test-token' };
+  const repos = await h['github:repos']({}, { config: githubConfig, search: 'muchos' });
+  assert.strictEqual(repos.ok, true, repos.error);
+  assert.strictEqual(repos.repos.length, 100);
+  assert.strictEqual(repos.truncated, true, '100 resultados = puede haber mas');
+  const branches = await h['github:branches']({}, { config: githubConfig, repo: 'jlozanoDev/destajo', search: 'muchas' });
+  assert.strictEqual(branches.truncated, true);
+  const pageTwo = requests.filter((request) => /[?&]page=2/.test(request.url));
+  assert.deepStrictEqual(pageTwo, [], 'no se recorre la pagina 2');
+});
+
+check('S7 la busqueda sigue enviando el token solo a GitHub (Authorization Bearer)', async (h, config) => {
+  requests = [];
+  const githubConfig = { ...config, githubUrl: config.baseUrl, githubToken: 'gh-test-token' };
+  await h['github:repos']({}, { config: githubConfig, search: 'destajo' });
+  const calls = requests.filter((request) => request.url.startsWith('/user/repos?') || request.url.startsWith('/repos/'));
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(calls[0].privateToken, 'Bearer gh-test-token');
+  assert.ok(!calls[0].url.includes('gh-test-token'), 'el token nunca va en la URL');
+});
+
+check('S7 no se envian parametros que la spec no pide (GitHub)', async (h, config) => {
+  requests = [];
+  const githubConfig = { ...config, githubUrl: config.baseUrl, githubToken: 'gh-test-token' };
+  await h['github:repos']({}, { config: githubConfig, search: 'destajo' });
+  await h['github:branches']({}, { config: githubConfig, repo: 'jlozanoDev/destajo', search: 'feature' });
+  const calls = requests.filter((request) => request.url.startsWith('/user/repos?') || request.url.startsWith('/repos/'));
+  assert.strictEqual(calls.length, 2);
+  for (const call of calls) {
+    const params = new URL(call.url, 'http://localhost').searchParams;
+    assert.ok(!params.has('order_by'), 'order_by no pedido: ' + call.url);
+    assert.ok(!params.has('sort'), 'sort no pedido: ' + call.url);
+    assert.ok(!params.has('regex'), 'regex no pedido: ' + call.url);
+  }
+});
+
+check('copy:issue appends the selected GitHub source-to-target diff after Jira Markdown', async (h, config) => {
+  requests = [];
+  const githubConfig = { ...config, githubUrl: config.baseUrl, githubToken: 'gh-test-token' };
+  const result = await h['copy:issue']({}, {
+    config: githubConfig,
+    issueKey: 'AAA-1',
+    sections: ['customfield_10090'],
+    comments: [],
+    includeMr: true,
+    provider: 'github',
+    github: {
+      repoFullName: 'jlozanoDev/destajo',
+      sourceBranch: 'feature/pr-diff',
+      targetBranch: 'main',
+    },
+  });
+  assert.strictEqual(result.ok, true, result.error);
+  const markdown = stub.__getClipboard();
+  const attachmentIndex = markdown.indexOf('## Adjuntos');
+  const diffIndex = markdown.indexOf('## Diff');
+  assert.ok(attachmentIndex > 0 && diffIndex > attachmentIndex, 'diff must follow the prior Jira copy');
+  assert.ok(markdown.includes('feature/pr-diff → main'), markdown);
+  assert.ok(markdown.includes('diff --git a/src/app.js b/src/app.js'), markdown);
+  assert.ok(markdown.includes('@@ -1 +1 @@\n-old\n+new'), markdown);
+  assert.ok(!markdown.includes('gh-test-token'), 'GitHub token must never enter copied Markdown');
+  const comparison = requests.find((request) =>
+    request.url.startsWith('/repos/jlozanoDev/destajo/compare/')
+  );
+  assert.ok(comparison, 'GitHub comparison endpoint must be called');
+  assert.ok(comparison.url.includes('main...feature%2Fpr-diff'), 'target is the base, source is the head');
+  assert.strictEqual(comparison.privateToken, 'Bearer gh-test-token');
+});
+
+check('copy:issue rechaza un GitHub no local y no copia nada', async (h, config) => {
+  stub.__reset();
+  const result = await h['copy:issue']({}, {
+    config: { ...config, githubUrl: 'http://github.example.com', githubToken: 'gh-test-token' },
+    issueKey: 'AAA-1',
+    sections: ['customfield_10090'],
+    comments: [],
+    includeMr: true,
+    provider: 'github',
+    github: { repoFullName: 'jlozanoDev/destajo', sourceBranch: 'feature/pr-diff', targetBranch: 'main' },
+  });
+  assert.strictEqual(result.ok, false);
+  assert.match(result.error, /HTTPS/);
+  assert.strictEqual(stub.__getClipboard(), '', 'un PR rechazado no debe escribir en el portapapeles');
+});
+
+check('GitHub no presenta un diff truncado como si no hubiera diferencias', async (h, config) => {
+  stub.__reset();
+  const result = await h['copy:issue']({}, {
+    config: { ...config, githubUrl: config.baseUrl, githubToken: 'gh-test-token' },
+    issueKey: 'AAA-1',
+    sections: ['customfield_10090'],
+    comments: [],
+    includeMr: true,
+    provider: 'github',
+    github: {
+      repoFullName: 'jlozanoDev/destajo',
+      sourceBranch: 'feature/overflow',
+      targetBranch: 'main',
+    },
+  });
+  assert.strictEqual(result.ok, false, 'un diff incompleto debe fallar, no copiarse vacio');
+  assert.match(result.error, /demasiado grande|incompleto/);
+  assert.ok(!stub.__getClipboard().includes('No hay diferencias'), 'no debe afirmarse que no hay cambios');
+});
+
+check('GitHub API does not follow redirects while sending credentials', async (h, config) => {
+  requests = [];
+  const result = await h['github:repos']({}, {
+    ...config,
+    githubUrl: config.baseUrl,
+    githubToken: 'redirect-test-token',
+  });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(requests.filter((request) => request.url.startsWith('/user/repos?')).length, 1);
+  assert.ok(!requests.some((request) => request.url === '/redirect-target'));
+});
+
+check('copy:issue does not overwrite the clipboard when GitHub credentials are missing', async (h, config) => {
+  const result = await h['copy:issue']({}, {
+    config,
+    issueKey: 'AAA-1',
+    sections: ['customfield_10090'],
+    comments: [],
+    includeMr: true,
+    provider: 'github',
+    github: { repoFullName: 'jlozanoDev/destajo', sourceBranch: 'feature/pr-diff', targetBranch: 'main' },
+  });
+  assert.strictEqual(result.ok, false);
+  assert.strictEqual(result.error, 'Falta el token de GitHub');
+  assert.strictEqual(stub.__getClipboard(), '');
+});
+
+check('GitHub empty comparison is appended as an explicit no-diff result', async (h, config) => {
+  const result = await h['copy:issue']({}, {
+    config: { ...config, githubUrl: config.baseUrl, githubToken: 'gh-test-token' },
+    issueKey: 'AAA-1',
+    sections: ['customfield_10090'],
+    comments: [],
+    includeMr: true,
+    provider: 'github',
+    github: {
+      repoFullName: 'jlozanoDev/destajo',
+      sourceBranch: 'feature/empty',
+      targetBranch: 'main',
+    },
+  });
+  assert.strictEqual(result.ok, true, result.error);
+  const markdown = stub.__getClipboard();
+  assert.ok(markdown.includes('## Diff de PR'), markdown);
+  assert.ok(markdown.includes('No hay diferencias entre las ramas seleccionadas.'), markdown);
+});
+
+check('GitHub timeout and incomplete diffs fail without copying partial output', async (h, config) => {
+  for (const sourceBranch of ['feature/timeout', 'feature/overflow']) {
+    stub.__reset();
+    const result = await h['copy:issue']({}, {
+      config: { ...config, githubUrl: config.baseUrl, githubToken: 'gh-test-token' },
+      issueKey: 'AAA-1',
+      sections: ['customfield_10090'],
+      comments: [],
+      includeMr: true,
+      provider: 'github',
+      github: {
+        repoFullName: 'jlozanoDev/destajo',
+        sourceBranch,
+        targetBranch: 'main',
+      },
+    });
+    assert.strictEqual(result.ok, false, sourceBranch);
+    assert.match(result.error, /GitHub/);
+    assert.strictEqual(stub.__getClipboard(), '', sourceBranch);
+  }
+});
+
 check('S1/S2 GitLab controls are wired through the preload and prompt for missing credentials', async () => {
   const html = fs.readFileSync(path.join(REPO, 'renderer', 'index.html'), 'utf8');
   const renderer = fs.readFileSync(path.join(REPO, 'renderer', 'renderer.js'), 'utf8');
@@ -626,6 +959,28 @@ check('S1/S2 GitLab controls are wired through the preload and prompt for missin
   assert.ok(preload.includes('getGitlabProjects'), 'project lookup must use the preload bridge');
   assert.ok(preload.includes('getGitlabBranches'), 'branch lookup must use the preload bridge');
   assert.ok(renderer.includes('openGitlabSettingsForCopy()'), 'missing credentials must open setup');
+  assert.ok(renderer.includes('option.textContent = item.label'), 'remote option labels use textContent');
+});
+
+check('S1/S2 GitHub controls are wired through the preload and prompt for missing credentials', async () => {
+  const html = fs.readFileSync(path.join(REPO, 'renderer', 'index.html'), 'utf8');
+  const renderer = fs.readFileSync(path.join(REPO, 'renderer', 'renderer.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(REPO, 'preload.js'), 'utf8');
+  for (const id of [
+    'githubUrl',
+    'githubToken',
+    'saveGithubCredentialsBtn',
+    'removeGithubCredentialsBtn',
+    'includeMrCheckbox',
+    'githubRepoInput',
+    'githubSourceBranchInput',
+    'githubTargetBranchInput',
+  ]) {
+    assert.ok(html.includes(`id="${id}"`), `missing UI element ${id}`);
+  }
+  assert.ok(preload.includes('getGithubRepos'), 'project lookup must use the preload bridge');
+  assert.ok(preload.includes('getGithubBranches'), 'branch lookup must use the preload bridge');
+  assert.ok(renderer.includes('openGithubSettingsForCopy()'), 'missing credentials must open setup');
   assert.ok(renderer.includes('option.textContent = item.label'), 'remote option labels use textContent');
 });
 
