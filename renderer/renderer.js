@@ -13,6 +13,8 @@ const els = {
   email: document.getElementById('email'),
   apiToken: document.getElementById('apiToken'),
   updateUrl: document.getElementById('updateUrl'),
+  checkUpdatesBtn: document.getElementById('checkUpdatesBtn'),
+  updateCheckStatus: document.getElementById('updateCheckStatus'),
   gitlabUrl: document.getElementById('gitlabUrl'),
   gitlabToken: document.getElementById('gitlabToken'),
   saveGitlabCredentialsBtn: document.getElementById('saveGitlabCredentialsBtn'),
@@ -216,7 +218,8 @@ function currentFormConfig() {
     baseUrl: normalizeBaseUrl(els.baseUrl.value),
     email: els.email.value.trim(),
     apiToken: els.apiToken.value.trim(),
-    updateUrl: els.updateUrl.value.trim(),
+    // updateUrl ya no se guarda; se usa GitHub Releases por defecto
+    updateUrl: '',
     gitlabUrl: els.gitlabUrl.value.trim(),
     gitlabToken: els.gitlabToken.value.trim(),
     githubUrl: (els.githubUrl && els.githubUrl.value.trim()) || '',
@@ -611,7 +614,9 @@ function openModal(defaultTab) {
     els.baseUrl.value = state.config.baseUrl || '';
     els.email.value = state.config.email || '';
     els.apiToken.value = state.config.apiToken || '';
-    els.updateUrl.value = state.config.updateUrl || '';
+    // updateUrl es fijo: GitHub Releases
+    els.updateUrl.value = 'https://github.com/jlozanoDev/destajo/releases';
+    els.updateUrl.readOnly = true;
     els.gitlabUrl.value = state.config.gitlabUrl || '';
     els.gitlabToken.value = state.config.gitlabToken || '';
     if (els.githubUrl) els.githubUrl.value = state.config.githubUrl || '';
@@ -722,6 +727,33 @@ els.testBtn.addEventListener('click', async () => {
     setFormMessage(`Conexion correcta: ${result.displayName || 'usuario'}`, 'ok');
   } else {
     setFormMessage('Error: ' + result.error, 'error');
+  }
+});
+
+els.checkUpdatesBtn.addEventListener('click', async () => {
+  els.checkUpdatesBtn.disabled = true;
+  els.updateCheckStatus.textContent = 'Buscando...';
+  els.updateCheckStatus.className = 'update-check-status';
+  try {
+    const { autoUpdater } = require('electron');
+    autoUpdater.checkForUpdates().then((result) => {
+      if (result && result.updateInfo) {
+        els.updateCheckStatus.textContent = `Nueva version: ${result.updateInfo.version}`;
+        els.updateCheckStatus.className = 'update-check-status ok';
+      } else {
+        els.updateCheckStatus.textContent = 'Ya tienes la ultima version';
+        els.updateCheckStatus.className = 'update-check-status ok';
+      }
+      els.checkUpdatesBtn.disabled = false;
+    }).catch((err) => {
+      els.updateCheckStatus.textContent = 'Error: ' + err.message;
+      els.updateCheckStatus.className = 'update-check-status error';
+      els.checkUpdatesBtn.disabled = false;
+    });
+  } catch (err) {
+    els.updateCheckStatus.textContent = 'Error: ' + err.message;
+    els.updateCheckStatus.className = 'update-check-status error';
+    els.checkUpdatesBtn.disabled = false;
   }
 });
 

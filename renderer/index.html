@@ -275,18 +275,21 @@
               </header>
               <div class="settings-card">
                 <label>
-                  URL de actualizaciones (opcional)
+                  Canal de actualizaciones
                   <input
                     id="updateUrl"
                     type="url"
-                    placeholder="https://tu-servidor/desTajo/"
+                    value="https://github.com/jlozanoDev/destajo/releases"
+                    readonly
                   />
-                  <small
-                    >URL HTTP de tu servidor de updates propio (latest.yml + .exe).
-                    Dejalo <strong>vacio</strong> para usar <strong>GitHub Releases</strong>
-                    (provider automático desde package.json).</small
-                  >
+                  <small>Las actualizaciones se descargan desde <strong>GitHub Releases</strong> (provider automático).</small>
                 </label>
+                <div class="settings-card-actions">
+                  <button type="button" id="checkUpdatesBtn" class="btn btn-secondary">
+                    Buscar actualizaciones
+                  </button>
+                  <span id="updateCheckStatus" class="update-check-status"></span>
+                </div>
               </div>
             </section>
 
@@ -301,7 +304,7 @@
                   <span class="about-logo">d</span>
                   <div class="about-info">
                     <strong>desTajo</strong>
-                    <span class="about-version">Version 2.1.0</span>
+                    <span class="about-version">Version 2.2.1</span>
                   </div>
                 </div>
                 <p class="about-desc">

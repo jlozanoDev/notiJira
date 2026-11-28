@@ -599,6 +599,35 @@ body {
   letter-spacing: 0.2px;
 }
 
+.settings-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.update-check-status {
+  font-size: 12px;
+  min-height: 16px;
+  transition: opacity 0.2s;
+}
+
+.update-check-status.ok {
+  color: var(--primary);
+}
+
+.update-check-status.error {
+  color: var(--danger);
+}
+
+input[readonly] {
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
 .settings-footer {
   margin-top: auto;
   padding-top: 14px;

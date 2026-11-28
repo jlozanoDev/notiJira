@@ -1,7 +1,7 @@
 {
   "name": "destajo",
   "productName": "desTajo",
-  "version": "2.1.0",
+  "version": "2.2.1",
   "description": "Herramientas de desarrollo: avisos de menciones de Jira, copia de tareas a Markdown y captura rapida de incidencias",
   "main": "main.js",
   "scripts": {
@@ -26,8 +26,9 @@
     },
     "publish": [
       {
-        "provider": "generic",
-        "url": "http://localhost:8080/"
+        "provider": "github",
+        "owner": "jlozanoDev",
+        "repo": "destajo"
       }
     ],
     "files": [
