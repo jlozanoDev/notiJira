@@ -1,7 +1,7 @@
 {
   "name": "destajo",
   "productName": "desTajo",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Herramientas de desarrollo: avisos de menciones de Jira, copia de tareas a Markdown y captura rapida de incidencias",
   "main": "main.js",
   "scripts": {

@@ -248,6 +248,209 @@ function formatGitLabDiff(comparison, selection) {
   return [title, `${fence}diff\n${diff}\n${fence}`].join('\n\n');
 }
 
+function normalizeGitHubBaseUrl(url) {
+  const trimmed = String(url || '').trim();
+  if (!trimmed) return 'https://api.github.com';
+  const base = normalizeBaseUrl(trimmed);
+
+  let parsed;
+  try {
+    parsed = new URL(base);
+  } catch (err) {
+    throw new Error('La URL de GitHub no es valida');
+  }
+  const hostname = (parsed.hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
+  const ipLiteral = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
+  const domainName = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(hostname);
+  const localHost = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(parsed.hostname);
+  if (!hostname || (!ipLiteral && !domainName && !localHost)) {
+    throw new Error('La URL de GitHub no es valida');
+  }
+  if (
+    parsed.username ||
+    parsed.password ||
+    (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && localHost))
+  ) {
+    throw new Error('La URL de GitHub debe usar HTTPS y no incluir credenciales');
+  }
+  if (hostname === 'github.com' && (!parsed.pathname || parsed.pathname === '/')) {
+    return 'https://api.github.com';
+  }
+  return `${parsed.origin}${parsed.pathname.replace(/\/+$/, '')}`;
+}
+
+async function githubRequest(config, endpoint, options = {}) {
+  const base = normalizeGitHubBaseUrl(config && config.githubUrl);
+  const token = String((config && config.githubToken) || '').trim();
+  if (!base) throw new Error('Falta la URL de GitHub');
+  if (!token) throw new Error('Falta el token de GitHub');
+
+  const headers = {
+    Authorization: `Bearer ${token}`,
+    Accept: options.accept || 'application/vnd.github+json',
+    'User-Agent': 'desTajo',
+    'X-GitHub-Api-Version': '2022-11-28',
+  };
+
+  let response;
+  try {
+    response = await fetch(`${base}${endpoint}`, {
+      headers,
+      redirect: 'error',
+    });
+  } catch (err) {
+    throw new Error('No se pudo conectar con GitHub; revisa la URL y la conexion');
+  }
+  if (!response.ok) {
+    const error = new Error(
+      `GitHub respondio ${response.status}. Comprueba la URL, el token y los permisos.`
+    );
+    error.status = response.status;
+    throw error;
+  }
+  if (options.rawText) {
+    return response.text();
+  }
+  return response.json();
+}
+
+const GITHUB_PAGE_SIZE = 100;
+
+async function searchGitHubPage(config, endpoint, search) {
+  const params = new URLSearchParams({
+    per_page: String(GITHUB_PAGE_SIZE),
+    page: '1',
+  });
+  const term = String(search || '').trim();
+  if (term) params.set('search', term);
+
+  const separator = endpoint.includes('?') ? '&' : '?';
+  const batch = await githubRequest(config, `${endpoint}${separator}${params.toString()}`);
+  if (!Array.isArray(batch)) {
+    if (batch && Array.isArray(batch.items)) {
+      return { items: batch.items, truncated: batch.items.length >= GITHUB_PAGE_SIZE };
+    }
+    throw new Error('GitHub devolvio una respuesta no valida');
+  }
+  return { items: batch, truncated: batch.length >= GITHUB_PAGE_SIZE };
+}
+
+async function getGitHubRepositories(config, search) {
+  const { items, truncated } = await searchGitHubPage(config, '/user/repos', search);
+  return {
+    truncated,
+    repos: items.map((repo) => ({
+      id: repo.id,
+      name: repo.name || '',
+      fullName: repo.full_name || repo.name || '',
+      owner: (repo.owner && repo.owner.login) || (repo.full_name ? repo.full_name.split('/')[0] : ''),
+      defaultBranch: repo.default_branch || 'main',
+      htmlUrl: repo.html_url || '',
+    })),
+  };
+}
+
+async function getGitHubBranches(config, repoFullName, search) {
+  const fullName = String(repoFullName || '').trim();
+  if (!fullName || !fullName.includes('/')) {
+    throw new Error('Selecciona un repositorio de GitHub (owner/repo)');
+  }
+  const [owner, repo] = fullName.split('/');
+  const { items, truncated } = await searchGitHubPage(
+    config,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches`,
+    search
+  );
+  const term = String(search || '').trim().toLowerCase();
+  const filtered = term
+    ? items.filter((b) => String(b.name || '').toLowerCase().includes(term))
+    : items;
+  return {
+    truncated,
+    branches: filtered.map((branch) => ({ name: branch.name || '' })).filter((branch) => branch.name),
+  };
+}
+
+async function compareGitHubBranches(config, selection) {
+  const fullName = String((selection && (selection.repoFullName || selection.repo)) || '').trim();
+  const sourceBranch = String((selection && selection.sourceBranch) || '').trim();
+  const targetBranch = String((selection && selection.targetBranch) || '').trim();
+  if (!fullName || !sourceBranch || !targetBranch) {
+    throw new Error('Selecciona el repositorio y las ramas de origen y destino');
+  }
+  const [owner, repo] = fullName.split('/');
+  if (!owner || !repo) {
+    throw new Error('El repositorio de GitHub debe tener el formato owner/repo');
+  }
+
+  const endpoint = `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/compare/${encodeURIComponent(targetBranch)}...${encodeURIComponent(sourceBranch)}`;
+  let result;
+  try {
+    result = await githubRequest(config, endpoint, {
+      accept: 'application/vnd.github.v3.diff',
+      rawText: true,
+    });
+  } catch (err) {
+    if (err.status && err.status !== 406) throw err;
+    result = await githubRequest(config, endpoint);
+  }
+  // Check for diff size limits (similar to GitLab's overflow/too_large checks)
+  if (typeof result === 'string') {
+    const diffText = result.trim();
+    if (!diffText) {
+      return result; // Empty diff is valid, handled by formatGitHubDiff
+    }
+    const MAX_DIFF_SIZE = 1024 * 1024; // 1 MB
+    if (Buffer.byteLength(diffText, 'utf8') > MAX_DIFF_SIZE) {
+      throw new Error('El diff entre las ramas es demasiado grande para GitHub; reduce el rango de commits');
+    }
+    // Check for truncated diff marker (GitHub may include a note about truncation)
+    if (diffText.includes('... (truncated)') || diffText.includes('(truncated)')) {
+      throw new Error('GitHub no devolvio el diff completo de todos los archivos');
+    }
+  }
+  return result;
+}
+
+function formatGitHubDiff(comparison, selection) {
+  const escapeTitle = (value) =>
+    String(value || '').replace(/[\r\n]+/g, ' ').replace(/[\\`*_{}\[\]()#+.!|>]/g, '\\$&');
+  const repoName = escapeTitle(selection.repoName || selection.repoFullName || selection.repo);
+  const sourceBranch = escapeTitle(selection.sourceBranch);
+  const targetBranch = escapeTitle(selection.targetBranch);
+  const title = `## Diff de PR — ${repoName} · ${sourceBranch} → ${targetBranch}`;
+
+  let diffText = '';
+  if (typeof comparison === 'string') {
+    diffText = comparison.trim();
+  } else if (comparison && Array.isArray(comparison.files)) {
+    diffText = comparison.files
+      .map((file) => {
+        const oldPath = file.previous_filename || file.filename || '';
+        const newPath = file.filename || oldPath;
+        const patch = String(file.patch || '');
+        if (!patch) return '';
+        if (/^diff --git /m.test(patch)) return patch;
+        return [
+          `diff --git a/${oldPath} b/${newPath}`,
+          `--- ${file.status === 'added' ? '/dev/null' : `a/${oldPath}`}`,
+          `+++ ${file.status === 'removed' ? '/dev/null' : `b/${newPath}`}`,
+          patch,
+        ].join('\n');
+      })
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  if (!diffText) {
+    return [title, 'No hay diferencias entre las ramas seleccionadas.'].join('\n\n');
+  }
+
+  const backtickRuns = diffText.match(/`+/g) || [];
+  const fence = '`'.repeat(Math.max(3, ...backtickRuns.map((run) => run.length + 1)));
+  return [title, `${fence}diff\n${diffText}\n${fence}`].join('\n\n');
+}
+
 function buildAuthHeader(config) {
   const email = (config.email || '').trim();
   const token = (config.apiToken || '').trim();
@@ -847,9 +1050,19 @@ async function copyIssueToClipboard(config, issueKey, selection) {
   if (!sections.length && !comments.length) {
     throw new Error('No has seleccionado nada para copiar');
   }
-  const gitlabComparison = selection.includeMr
-    ? await compareGitLabBranches(config, gitlabSelection)
-    : null;
+  const provider =
+    selection.provider ||
+    (selection.github && (selection.github.repo || selection.github.repoFullName) ? 'github' : 'gitlab');
+  let diffBlock = null;
+  if (selection.includeMr) {
+    if (provider === 'github') {
+      const comparison = await compareGitHubBranches(config, selection.github || {});
+      diffBlock = formatGitHubDiff(comparison, selection.github || {});
+    } else {
+      const comparison = await compareGitLabBranches(config, gitlabSelection);
+      diffBlock = formatGitLabDiff(comparison, gitlabSelection);
+    }
+  }
 
   // Descarga: todos los adjuntos de la tarea (S3) + los medios inline que
   // aparezcan dentro del contenido seleccionado.
@@ -918,8 +1131,8 @@ async function copyIssueToClipboard(config, issueKey, selection) {
       blocks.push(target ? `- [${item.filename}](<${target}>)` : `- ${item.filename}`);
     }
   }
-  if (gitlabComparison) {
-    blocks.push(formatGitLabDiff(gitlabComparison, gitlabSelection));
+  if (diffBlock) {
+    blocks.push(diffBlock);
   }
 
   const markdown = blocks.filter((block) => block !== '').join('\n\n');
@@ -1531,6 +1744,8 @@ ipcMain.handle('config:get', () => {
     updateUrl: config.updateUrl || '',
     gitlabUrl: config.gitlabUrl || '',
     gitlabToken: config.gitlabToken || '',
+    githubUrl: config.githubUrl || '',
+    githubToken: config.githubToken || '',
     bugHotkey: config.bugHotkey || DEFAULT_BUG_HOTKEY,
     bugStartAtLogin: config.bugStartAtLogin === true,
     bugShortcutActive: Boolean(
@@ -1552,9 +1767,31 @@ ipcMain.handle('config:save', (_event, config) => {
     return { ok: false, error: err.message };
   }
 
-  // Otros flujos de guardado (por ejemplo las credenciales de GitLab) envian un
-  // payload parcial: el atajo y el arranque se conservan cuando no vienen.
   const stored = readConfig() || {};
+  let githubUrl = '';
+  if (incoming.githubUrl !== undefined) {
+    const rawGitHub = String(incoming.githubUrl || '').trim();
+    if (rawGitHub) {
+      try {
+        githubUrl = normalizeGitHubBaseUrl(rawGitHub);
+      } catch (err) {
+        return { ok: false, error: err.message };
+      }
+    }
+  } else {
+    githubUrl = stored.githubUrl || '';
+  }
+  const githubToken =
+    incoming.githubToken !== undefined
+      ? String(incoming.githubToken || '').trim()
+      : (stored.githubToken || '');
+
+  if (githubToken && !githubUrl) {
+    githubUrl = 'https://api.github.com';
+  }
+
+  // Otros flujos de guardado (por ejemplo las credenciales de GitLab o GitHub) envian un
+  // payload parcial: el atajo y el arranque se conservan cuando no vienen.
   const explicitHotkey =
     incoming.bugHotkey !== undefined && String(incoming.bugHotkey).trim()
       ? String(incoming.bugHotkey).trim()
@@ -1583,7 +1820,9 @@ ipcMain.handle('config:save', (_event, config) => {
       apiToken: (incoming.apiToken || '').trim(),
       updateUrl: (incoming.updateUrl || '').trim(),
       gitlabUrl,
-      gitlabToken: gitlabUrl ? (incoming.gitlabToken || '').trim() : '',
+      gitlabToken: gitlabUrl ? (incoming.gitlabToken !== undefined ? String(incoming.gitlabToken || '').trim() : stored.gitlabToken || '') : '',
+      githubUrl: githubToken ? githubUrl : (incoming.githubUrl !== undefined ? (incoming.githubUrl ? githubUrl : '') : (stored.githubUrl || '')),
+      githubToken,
       bugHotkey: shortcut.ok ? bugHotkey : activeBugHotkey || bugHotkey,
       bugStartAtLogin,
     });
@@ -1596,6 +1835,31 @@ ipcMain.handle('config:save', (_event, config) => {
     if (shortcut && shortcut.ok && hotkeyBefore && hotkeyBefore !== bugHotkey) {
       applyBugShortcut(hotkeyBefore);
     }
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('github:repos', async (_event, payload) => {
+  try {
+    const config = payload && payload.config ? payload.config : payload;
+    const search = (payload && payload.search) || '';
+    const result = await getGitHubRepositories(config, search);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('github:branches', async (_event, payload) => {
+  try {
+    const config = payload && payload.config;
+    const result = await getGitHubBranches(
+      config,
+      payload && (payload.repo || payload.repoFullName || payload.projectId),
+      (payload && payload.search) || ''
+    );
+    return { ok: true, ...result };
+  } catch (err) {
     return { ok: false, error: err.message };
   }
 });

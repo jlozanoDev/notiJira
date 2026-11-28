@@ -32,9 +32,12 @@ The renderer never touches `fs`, `fetch`, or Node APIs. `main.js` owns all I/O.
 | `jira:notifications` | `getNotifications(cfg)` | `fetchNotifications` | `{ ok, notifications }` or `{ ok: false, error }` |
 | `gitlab:projects` | `getGitlabProjects(cfg, search)` | one `GET /projects` page filtered by `search` | `{ ok, projects, truncated }` or `{ ok: false, error }` |
 | `gitlab:branches` | `getGitlabBranches(cfg, projectId, search)` | one `GET /projects/:id/repository/branches` page filtered by `search` | `{ ok, branches, truncated }` or `{ ok: false, error }` |
+| `github:repos` | `getGithubRepos(cfg, search)` | one `GET /user/repos` page filtered by `search` | `{ ok, repos, truncated }` or `{ ok: false, error }` |
+| `github:branches` | `getGithubBranches(cfg, repo, search)` | one `GET /repos/{owner}/{repo}/branches` page filtered by `search` | `{ ok, branches, truncated }` or `{ ok: false, error }` |
 | `jira:searchIssues` | `searchIssues(cfg, query)` | key lookup, else JQL `text ~` search | `{ ok, results }` or `{ ok: false, error }` |
 | `jira:issueCopyData` | `getIssueCopyData(cfg, issueKey)` | `getCachedCopyRaw`, then a preview | `{ ok, issue, sections, comments, attachments }` or `{ ok: false, error }` |
 | `copy:issue` | `copyIssue(cfg, payload)` | builds the Markdown, downloads assets, writes the clipboard | `{ ok, sections, comments, attachments, downloaded, failed, chars, folder }` or `{ ok: false, error }` |
+| | | Payload extended: `includeMr`, `provider` ('gitlab'|'github'), `gitlab` `{projectId, projectName, sourceBranch, targetBranch}`, `github` `{owner, repo, fullName, sourceBranch, targetBranch}` | |
 | `shell:openExternal` | `openExternal(url)` | validates `^https?://`, then `shell.openExternal` | `boolean` |
 | `notify` | `notify(payload)` | native `Notification` | `boolean` |
 | `bugs:list` | `listBugs()` | reads every `bugs/<id>/nota.json`, newest first | `{ ok, items }` or `{ ok: false, error }` |
@@ -60,7 +63,7 @@ The copy flow can request a GitLab branch comparison through `copy:issue`; GitLa
 
 After a project is selected, the source-branch combobox searches with the Jira issue key and the target-branch combobox searches with `develop`. An exact returned match is selected automatically; otherwise the typed default stays editable with GitLab's suggestions.
 
-`config:save` returns `{ ok: true }` or `{ ok: false, error }`; it never rejects across IPC. A rejected save leaves `config.json` untouched, so the renderer must check `ok` and keep the settings modal open. After a successful save the renderer re-reads `getConfig()` because the main process normalizes the URLs. If the settings modal was opened from the copy flow (`state.returnToCopyModal`), `restoreCopyModalAfterGitlabSetup()` reopens the copy modal with the GitLab panel visible — do not replace it with a plain `closeModal()`, that leaves the selectors hidden.
+`config:save` returns `{ ok: true }` or `{ ok: false, error }`; it never rejects across IPC. A rejected save leaves `config.json` untouched, so the renderer must check `ok` and keep the settings modal open. After a successful save the renderer re-reads `getConfig()` because the main process normalizes the URLs. The handler preserves `gitlabUrl`, `gitlabToken`, `githubUrl`, `githubToken`, `bugHotkey`, and `bugStartAtLogin` when a partial payload omits them. If the settings modal was opened from the copy flow (`state.returnToCopyModal`), `restoreCopyModalAfterGitSetup()` reopens the copy modal with the appropriate provider panel visible — do not replace it with a plain `closeModal()`, that leaves the selectors hidden.
 
 ## Jira access
 
@@ -87,6 +90,14 @@ Mention scan: JQL `comment ~ currentUser() AND updated >= -90d`, retried with `c
 - Project and branch lists are searched **server-side** with the `search` parameter, one page of 100 (`per_page=100&page=1`) per query. `truncated: true` means GitLab filled the page, so the UI asks for a more specific term. The renderer debounces queries at 250 ms and keeps one sequence number per field, so a slow response never overwrites a newer list of the same field.
 - The comparison uses the target branch as `from` and source branch as `to`; its diff is appended after the Jira Markdown.
 - GitLab credentials share `config.json` in `app.getPath('userData')` and are stored in plain text like Jira credentials. Never log either token or include it in copied Markdown.
+
+## GitHub access
+
+- Configure a Personal Access Token (classic or fine-grained) with `repo` permission. The default instance URL is `https://api.github.com`; GitHub Enterprise Server instances are supported by changing the URL (HTTPS required, HTTP only for local loopback).
+- `main.js` sends the token in the `Authorization: Bearer` header to that configured host and uses `/user/repos`, `/repos/{owner}/{repo}/branches`, and `/repos/{owner}/{repo}/compare/{base}...{head}`. Requests reject redirects to avoid forwarding the token; the `Accept: application/vnd.github.v3.diff` header is preferred for unified diffs, with fallback to JSON.
+- Repository and branch lists are searched **server-side** with the `search` parameter, one page of 100 per query. `truncated: true` means GitHub filled the page, so the UI asks for a more specific term. The renderer debounces queries at 250 ms and keeps one sequence number per field.
+- The comparison uses the target branch as `from` (base) and source branch as `to` (head); its diff is appended after the Jira Markdown with the label `## Diff de PR — {owner/repo} · {origen} → {destino}`.
+- GitHub credentials share `config.json` in `app.getPath('userData')` and are stored in plain text. Never log the token or include it in copied Markdown.
 
 ## Bug inbox
 

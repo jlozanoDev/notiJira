@@ -17,6 +17,11 @@ const els = {
   gitlabToken: document.getElementById('gitlabToken'),
   saveGitlabCredentialsBtn: document.getElementById('saveGitlabCredentialsBtn'),
   removeGitlabCredentialsBtn: document.getElementById('removeGitlabCredentialsBtn'),
+  githubUrl: document.getElementById('githubUrl'),
+  githubToken: document.getElementById('githubToken'),
+  saveGithubCredentialsBtn: document.getElementById('saveGithubCredentialsBtn'),
+  removeGithubCredentialsBtn: document.getElementById('removeGithubCredentialsBtn'),
+  settingsBackBtn: document.getElementById('settingsBackBtn'),
   formMessage: document.getElementById('formMessage'),
   testBtn: document.getElementById('testBtn'),
   cancelBtn: document.getElementById('cancelBtn'),
@@ -35,6 +40,7 @@ const els = {
   copyComments: document.getElementById('copyComments'),
   copyAttachmentsNote: document.getElementById('copyAttachmentsNote'),
   includeMrCheckbox: document.getElementById('includeMrCheckbox'),
+  gitProviderTabs: document.getElementById('gitProviderTabs'),
   gitlabSelection: document.getElementById('gitlabSelection'),
   gitlabProjectInput: document.getElementById('gitlabProjectInput'),
   gitlabProjectList: document.getElementById('gitlabProjectList'),
@@ -42,7 +48,15 @@ const els = {
   gitlabSourceBranchList: document.getElementById('gitlabSourceBranchList'),
   gitlabTargetBranchInput: document.getElementById('gitlabTargetBranchInput'),
   gitlabTargetBranchList: document.getElementById('gitlabTargetBranchList'),
+  githubSelection: document.getElementById('githubSelection'),
+  githubRepoInput: document.getElementById('githubRepoInput'),
+  githubRepoList: document.getElementById('githubRepoList'),
+  githubSourceBranchInput: document.getElementById('githubSourceBranchInput'),
+  githubSourceBranchList: document.getElementById('githubSourceBranchList'),
+  githubTargetBranchInput: document.getElementById('githubTargetBranchInput'),
+  githubTargetBranchList: document.getElementById('githubTargetBranchList'),
   gitlabMessage: document.getElementById('gitlabMessage'),
+  githubMessage: document.getElementById('githubMessage'),
   copyMessage: document.getElementById('copyMessage'),
   copyCancelBtn: document.getElementById('copyCancelBtn'),
   copyDoBtn: document.getElementById('copyDoBtn'),
@@ -123,6 +137,8 @@ const state = {
   selectedComments: new Set(),
   returnToCopyModal: false,
   gitlabSession: 0,
+  githubSession: 0,
+  gitProvider: 'gitlab',
   bugs: [],
   bugFilter: 'pending',
   bugSearch: '',
@@ -203,6 +219,8 @@ function currentFormConfig() {
     updateUrl: els.updateUrl.value.trim(),
     gitlabUrl: els.gitlabUrl.value.trim(),
     gitlabToken: els.gitlabToken.value.trim(),
+    githubUrl: (els.githubUrl && els.githubUrl.value.trim()) || '',
+    githubToken: (els.githubToken && els.githubToken.value.trim()) || '',
   };
   // Sin el formulario cargado no se sabe si los campos reflejan lo guardado:
   // se omite la clave y main.js conserva la almacenada.
@@ -576,7 +594,17 @@ async function connectAndLoad() {
   startAutoRefresh();
 }
 
-function openModal() {
+function switchSettingsTab(tabName) {
+  const target = tabName || 'jira';
+  document.querySelectorAll('.settings-nav-item').forEach((item) => {
+    item.classList.toggle('active', item.dataset.tab === target);
+  });
+  document.querySelectorAll('.settings-panel').forEach((panel) => {
+    panel.classList.toggle('hidden', panel.dataset.panel !== target);
+  });
+}
+
+function openModal(defaultTab) {
   els.formMessage.textContent = '';
   els.formMessage.className = 'form-message';
   if (state.config) {
@@ -586,6 +614,8 @@ function openModal() {
     els.updateUrl.value = state.config.updateUrl || '';
     els.gitlabUrl.value = state.config.gitlabUrl || '';
     els.gitlabToken.value = state.config.gitlabToken || '';
+    if (els.githubUrl) els.githubUrl.value = state.config.githubUrl || '';
+    if (els.githubToken) els.githubToken.value = state.config.githubToken || '';
     applyBugConfigToForm(state.config);
   }
   // El formulario se muestra completo desde la primera vez: si no hay config
@@ -593,6 +623,7 @@ function openModal() {
   // (sin esto, en una instalacion nueva se perdia lo que el usuario eligio).
   if (!state.config) applyBugConfigToForm(null);
   state.bugSettingsLoaded = true;
+  switchSettingsTab(typeof defaultTab === 'string' ? defaultTab : 'jira');
   els.modal.classList.remove('hidden');
   els.baseUrl.focus();
 }
@@ -602,21 +633,47 @@ function closeModal() {
   if (state.returnToCopyModal) {
     state.returnToCopyModal = false;
     els.includeMrCheckbox.checked = false;
+    if (els.gitProviderTabs) els.gitProviderTabs.classList.add('hidden');
     setGitlabSelectionVisible(false);
+    setGithubSelectionVisible(false);
     els.copyModal.classList.remove('hidden');
   }
 }
 
-// Vuelve a la modal de copia tras configurar GitLab dejando el check activo y
+// Vuelve a la modal de copia tras configurar GitLab o GitHub dejando el check activo y
 // los selectores visibles; no hace nada si la configuracion se abrio sola.
-function restoreCopyModalAfterGitlabSetup() {
+function restoreCopyModalAfterGitSetup(savedConfig) {
   if (!state.returnToCopyModal) return false;
   state.returnToCopyModal = false;
   els.modal.classList.add('hidden');
   els.copyModal.classList.remove('hidden');
   els.includeMrCheckbox.checked = true;
-  setGitlabSelectionVisible(true);
-  loadGitlabProjects();
+
+  // El payload recien guardado manda sobre la config releida: el proceso principal
+  // normaliza las URLs y la relectura puede no reflejar todavia lo que se acaba de
+  // guardar. Aqui solo se decide que proveedor hay activo; las peticiones usan
+  // state.config.
+  const cfg = { ...(state.config || {}), ...(savedConfig || {}) };
+  const hasGitlab = !!(cfg.gitlabUrl && cfg.gitlabToken);
+  const hasGithub = !!(cfg.githubToken);
+
+  if (hasGitlab || hasGithub) {
+    if (els.gitProviderTabs) {
+      els.gitProviderTabs.classList.toggle('hidden', !(hasGitlab && hasGithub));
+    }
+    document.querySelectorAll('.provider-tab').forEach((tab) => {
+      tab.classList.toggle('active', tab.dataset.provider === state.gitProvider);
+    });
+    if (state.gitProvider === 'github' && hasGithub) {
+      setGithubSelectionVisible(true);
+      loadGitHubRepos();
+    } else {
+      state.gitProvider = 'gitlab';
+      setGitlabSelectionVisible(true);
+      loadGitlabProjects();
+    }
+  }
+
   return true;
 }
 
@@ -689,7 +746,7 @@ els.configForm.addEventListener('submit', async (e) => {
     applyBugConfigToForm(state.config);
     setFormMessage(result.hotkeyError, 'error');
   } else {
-    const resumed = restoreCopyModalAfterGitlabSetup();
+    const resumed = restoreCopyModalAfterGitSetup(config);
     if (!resumed) closeModal();
   }
   els.refreshBtn.disabled = false;
@@ -712,7 +769,7 @@ els.saveGitlabCredentialsBtn.addEventListener('click', async () => {
   }
   state.config = (await window.api.getConfig()) || config;
   setFormMessage('Credenciales de GitLab guardadas.', 'ok');
-  restoreCopyModalAfterGitlabSetup();
+  restoreCopyModalAfterGitSetup(config);
 });
 
 els.removeGitlabCredentialsBtn.addEventListener('click', async () => {
@@ -731,6 +788,57 @@ els.removeGitlabCredentialsBtn.addEventListener('click', async () => {
   els.gitlabUrl.value = '';
   els.gitlabToken.value = '';
   setFormMessage('Credenciales de GitLab eliminadas.', 'ok');
+});
+
+if (els.saveGithubCredentialsBtn) {
+  els.saveGithubCredentialsBtn.addEventListener('click', async () => {
+    const config = currentFormConfig();
+    if (!config.githubToken) {
+      setFormMessage('Introduce el token de GitHub.', 'error');
+      return;
+    }
+    const result = await window.api.saveConfig(config);
+    if (!result || !result.ok) {
+      setFormMessage(
+        'Error al guardar las credenciales: ' + ((result && result.error) || 'desconocido'),
+        'error'
+      );
+      return;
+    }
+    state.config = (await window.api.getConfig()) || config;
+    setFormMessage('Credenciales de GitHub guardadas.', 'ok');
+    restoreCopyModalAfterGitSetup(config);
+  });
+}
+
+if (els.removeGithubCredentialsBtn) {
+  els.removeGithubCredentialsBtn.addEventListener('click', async () => {
+    const config = currentFormConfig();
+    config.githubUrl = '';
+    config.githubToken = '';
+    const result = await window.api.saveConfig(config);
+    if (!result || !result.ok) {
+      setFormMessage(
+        'Error al eliminar las credenciales: ' + ((result && result.error) || 'desconocido'),
+        'error'
+      );
+      return;
+    }
+    state.config = (await window.api.getConfig()) || config;
+    if (els.githubUrl) els.githubUrl.value = '';
+    if (els.githubToken) els.githubToken.value = '';
+    setFormMessage('Credenciales de GitHub eliminadas.', 'ok');
+  });
+}
+
+if (els.settingsBackBtn) {
+  els.settingsBackBtn.addEventListener('click', closeModal);
+}
+
+document.querySelectorAll('.settings-nav-item').forEach((item) => {
+  item.addEventListener('click', () => {
+    if (item.dataset.tab) switchSettingsTab(item.dataset.tab);
+  });
 });
 
 els.refreshBtn.addEventListener('click', () => loadNotifications());
@@ -752,6 +860,11 @@ function setCopyMessage(message, type) {
 function setGitlabMessage(message, type) {
   els.gitlabMessage.textContent = message || '';
   els.gitlabMessage.className = 'form-message ' + (type || '');
+}
+
+function setGithubMessage(message, type) {
+  els.githubMessage.textContent = message || '';
+  els.githubMessage.className = 'form-message ' + (type || '');
 }
 
 function openSearchModal() {
@@ -1245,6 +1358,80 @@ const gitlabTargetCombo = createCombo(
 const gitlabCombos = [gitlabProjectCombo, gitlabSourceCombo, gitlabTargetCombo];
 
 // ---------------------------------------------------------------------------
+// Buscadores de repositorio y ramas de GitHub. Mismo patron que GitLab.
+// ---------------------------------------------------------------------------
+
+async function fetchGitHubRepoItems(term) {
+  const result = await window.api.getGithubRepos(state.config, term);
+  if (!result || !result.ok) {
+    return { ok: false, error: (result && result.error) || 'respuesta no valida' };
+  }
+  return {
+    ok: true,
+    truncated: !!result.truncated,
+    items: (result.repos || []).map((repo) => ({
+      value: repo.full_name || repo.name,
+      label: repo.full_name || repo.name,
+    })),
+  };
+}
+
+async function fetchGitHubBranchItems(term) {
+  const repo = githubRepoCombo.selected;
+  if (!repo) return { ok: true, items: [], truncated: false };
+  const result = await window.api.getGithubBranches(state.config, repo.value, term);
+  if (!result || !result.ok) {
+    return { ok: false, error: (result && result.error) || 'respuesta no valida' };
+  }
+  return {
+    ok: true,
+    truncated: !!result.truncated,
+    items: (result.branches || []).map((b) => ({ value: b.name, label: b.name })),
+  };
+}
+
+const githubComboBase = (extra) =>
+  Object.assign(
+    {
+      isActive: () =>
+        els.includeMrCheckbox.checked && !els.githubSelection.classList.contains('hidden'),
+      session: () => state.githubSession,
+      setMessage: setGithubMessage,
+      disableWhenInactive: true,
+    },
+    extra
+  );
+
+const githubRepoCombo = createCombo(
+  els.githubRepoInput,
+  els.githubRepoList,
+  githubComboBase({
+    label: 'GitHub',
+    fetchItems: fetchGitHubRepoItems,
+    onChange: (repo) => loadGitHubBranches(repo.value),
+  })
+);
+const githubSourceCombo = createCombo(
+  els.githubSourceBranchInput,
+  els.githubSourceBranchList,
+  githubComboBase({
+    label: 'las ramas',
+    fetchItems: (term) => fetchGitHubBranchItems(term),
+    prerequisite: () => !!githubRepoCombo.selected,
+  })
+);
+const githubTargetCombo = createCombo(
+  els.githubTargetBranchInput,
+  els.githubTargetBranchList,
+  githubComboBase({
+    label: 'las ramas',
+    fetchItems: (term) => fetchGitHubBranchItems(term),
+    prerequisite: () => !!githubRepoCombo.selected,
+  })
+);
+const githubCombos = [githubRepoCombo, githubSourceCombo, githubTargetCombo];
+
+// ---------------------------------------------------------------------------
 // Buscador de tareas: el mismo combo que GitLab, alimentado por jira:searchIssues
 // ---------------------------------------------------------------------------
 
@@ -1354,6 +1541,15 @@ function setGitlabSelectionVisible(visible) {
   gitlabTargetCombo.reset();
 }
 
+function setGithubSelectionVisible(visible) {
+  state.githubSession += 1;
+  els.githubSelection.classList.toggle('hidden', !visible);
+  setGithubMessage('', '');
+  githubRepoCombo.reset();
+  githubSourceCombo.reset();
+  githubTargetCombo.reset();
+}
+
 // Primera pagina de proyectos: al abrir el panel y al volver de la configuracion.
 function loadGitlabProjects() {
   setGitlabMessage('Consultando proyectos de GitLab...', '');
@@ -1403,17 +1599,70 @@ async function loadGitlabBranches(projectId) {
 function openGitlabSettingsForCopy() {
   state.returnToCopyModal = true;
   els.copyModal.classList.add('hidden');
-  openModal();
+  openModal('git');
   setFormMessage('Configura la URL y el token de GitLab para obtener el MR.', '');
   els.gitlabUrl.focus();
+}
+
+function openGithubSettingsForCopy() {
+  state.returnToCopyModal = true;
+  els.copyModal.classList.add('hidden');
+  openModal('git');
+  setFormMessage('Configura el token de GitHub para obtener el PR.', '');
+  if (els.githubToken) els.githubToken.focus();
+}
+
+// Primera pagina de repositorios de GitHub al abrir el panel.
+function loadGitHubRepos() {
+  setGithubMessage('Consultando repositorios de GitHub...', '');
+  return githubRepoCombo.request('', true);
+}
+
+// Al elegir repositorio se buscan las ramas: origen por clave Jira y destino main/develop.
+async function loadGitHubBranches(repoFullName) {
+  githubSourceCombo.reset();
+  githubTargetCombo.reset();
+  const session = state.githubSession;
+  if (!repoFullName) {
+    setGithubMessage('', '');
+    return;
+  }
+
+  const issueKey =
+    state.copyData && state.copyData.issue
+      ? String(state.copyData.issue.key || '').trim()
+      : '';
+  if (!issueKey) {
+    setGithubMessage('No se pudo obtener la clave Jira para buscar la rama de origen.', 'error');
+    return;
+  }
+
+  const [sourceResult, targetResult] = await Promise.all([
+    githubSourceCombo.search(issueKey, { immediate: true, open: true, selectExact: true }),
+    githubTargetCombo.search('main', { immediate: true, open: true, selectExact: true }),
+  ]);
+  if (session !== state.githubSession || !els.includeMrCheckbox.checked) return;
+
+  if (!sourceResult || !sourceResult.ok || !targetResult || !targetResult.ok) return;
+  setGithubMessage(
+    `Busquedas predeterminadas: origen ${issueKey}, destino main. Escribe para ajustar.`,
+    'ok'
+  );
 }
 
 async function openCopyModal(issueKey, summary) {
   state.copyData = null;
   state.selectedSections = new Set();
   state.selectedComments = new Set();
+  state.gitProvider = 'gitlab';
   els.includeMrCheckbox.checked = false;
+  if (els.gitProviderTabs) els.gitProviderTabs.classList.add('hidden');
+  // Reset provider tab UI
+  document.querySelectorAll('.provider-tab').forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.provider === 'gitlab');
+  });
   setGitlabSelectionVisible(false);
+  setGithubSelectionVisible(false);
 
   els.copyTitle.textContent = `Copiar ${issueKey}`;
   els.copySubtitle.textContent = summary
@@ -1447,18 +1696,75 @@ async function openCopyModal(issueKey, summary) {
   els.copyDoBtn.disabled = false;
 }
 
-els.includeMrCheckbox.addEventListener('change', () => {
+// Muestra u oculta la seccion correcta segun el proveedor activo.
+function handleDiffCheckboxChange() {
   if (!els.includeMrCheckbox.checked) {
+    if (els.gitProviderTabs) els.gitProviderTabs.classList.add('hidden');
     setGitlabSelectionVisible(false);
+    setGithubSelectionVisible(false);
     return;
   }
-  if (!state.config.gitlabUrl || !state.config.gitlabToken) {
+
+  const hasGitlab = !!(state.config && state.config.gitlabUrl && state.config.gitlabToken);
+  const hasGithub = !!(state.config && state.config.githubToken);
+
+  if (!hasGitlab && !hasGithub) {
+    // Sin ningun proveedor: abrir ajustes de Git
     setGitlabSelectionVisible(false);
+    setGithubSelectionVisible(false);
     openGitlabSettingsForCopy();
     return;
   }
-  setGitlabSelectionVisible(true);
-  loadGitlabProjects();
+
+  // Mostrar tabs solo si hay dos proveedores configurados
+  if (els.gitProviderTabs) {
+    els.gitProviderTabs.classList.toggle('hidden', !(hasGitlab && hasGithub));
+  }
+
+  // Seleccionar proveedor: si hay uno solo, se usa ese directamente
+  if (!hasGitlab && hasGithub) {
+    state.gitProvider = 'github';
+  } else {
+    state.gitProvider = 'gitlab';
+  }
+
+  // Resetear tabs UI al proveedor activo
+  document.querySelectorAll('.provider-tab').forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.provider === state.gitProvider);
+  });
+
+  if (state.gitProvider === 'github') {
+    setGitlabSelectionVisible(false);
+    setGithubSelectionVisible(true);
+    loadGitHubRepos();
+  } else {
+    setGithubSelectionVisible(false);
+    setGitlabSelectionVisible(true);
+    loadGitlabProjects();
+  }
+}
+
+els.includeMrCheckbox.addEventListener('change', handleDiffCheckboxChange);
+
+// Tabs de proveedor dentro del copy modal
+document.querySelectorAll('.provider-tab').forEach((tab) => {
+  tab.addEventListener('click', () => {
+    const provider = tab.dataset.provider;
+    if (!provider || provider === state.gitProvider) return;
+    state.gitProvider = provider;
+    document.querySelectorAll('.provider-tab').forEach((t) => {
+      t.classList.toggle('active', t.dataset.provider === provider);
+    });
+    if (provider === 'github') {
+      setGitlabSelectionVisible(false);
+      setGithubSelectionVisible(true);
+      loadGitHubRepos();
+    } else {
+      setGithubSelectionVisible(false);
+      setGitlabSelectionVisible(true);
+      loadGitlabProjects();
+    }
+  });
 });
 
 els.searchBtn.addEventListener('click', openSearchModal);
@@ -1503,24 +1809,43 @@ els.copyDoBtn.addEventListener('click', async () => {
 
   const includeMr = els.includeMrCheckbox.checked;
   const gitlab = { projectId: '', projectName: '', sourceBranch: '', targetBranch: '' };
+  const github = { repoFullName: '', sourceBranch: '', targetBranch: '' };
   if (includeMr) {
-    // Un texto escrito solo vale si GitLab lo devuelve como nombre exacto.
-    await Promise.all(gitlabCombos.map((combo) => combo.commitTyped()));
-    const project = gitlabProjectCombo.selected;
-    const source = gitlabSourceCombo.selected;
-    const target = gitlabTargetCombo.selected;
-    if (!project) {
-      setGitlabMessage('Selecciona un proyecto de GitLab en la lista.', 'error');
-      return;
+    if (state.gitProvider === 'github') {
+      await Promise.all(githubCombos.map((combo) => combo.commitTyped()));
+      const repo = githubRepoCombo.selected;
+      const source = githubSourceCombo.selected;
+      const target = githubTargetCombo.selected;
+      if (!repo) {
+        setGithubMessage('Selecciona un repositorio de GitHub en la lista.', 'error');
+        return;
+      }
+      if (!source || !target) {
+        setGithubMessage('Selecciona en la lista las ramas de origen y destino.', 'error');
+        return;
+      }
+      github.repoFullName = repo.value;
+      github.sourceBranch = source.value;
+      github.targetBranch = target.value;
+    } else {
+      // Un texto escrito solo vale si GitLab lo devuelve como nombre exacto.
+      await Promise.all(gitlabCombos.map((combo) => combo.commitTyped()));
+      const project = gitlabProjectCombo.selected;
+      const source = gitlabSourceCombo.selected;
+      const target = gitlabTargetCombo.selected;
+      if (!project) {
+        setGitlabMessage('Selecciona un proyecto de GitLab en la lista.', 'error');
+        return;
+      }
+      if (!source || !target) {
+        setGitlabMessage('Selecciona en la lista las ramas de origen y destino.', 'error');
+        return;
+      }
+      gitlab.projectId = project.value;
+      gitlab.projectName = project.label;
+      gitlab.sourceBranch = source.value;
+      gitlab.targetBranch = target.value;
     }
-    if (!source || !target) {
-      setGitlabMessage('Selecciona en la lista las ramas de origen y destino.', 'error');
-      return;
-    }
-    gitlab.projectId = project.value;
-    gitlab.projectName = project.label;
-    gitlab.sourceBranch = source.value;
-    gitlab.targetBranch = target.value;
   }
 
   els.copyDoBtn.disabled = true;
@@ -1530,7 +1855,9 @@ els.copyDoBtn.addEventListener('click', async () => {
     sections,
     comments,
     includeMr,
+    provider: state.gitProvider,
     gitlab,
+    github,
   });
   els.copyDoBtn.disabled = false;
 
