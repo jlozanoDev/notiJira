@@ -26,7 +26,8 @@
 - [x] T5 `S8` — `scripts/test-support/electron-stub.js` paths and `scripts/check-rename-migration.js` plus its npm script. Route: inline. Evidence: `373551d`, 7/7 green.
 - [x] T6 `S8` — verification: `node --check`, all `check:*` scripts, app start. Route: inline + independent verifier (data migration is high risk). Evidence: 13/13, 34/34, 27/27, 10/10, 45/45, 7/7.
 - [x] T7 `S10` — `assets/destajo.svg`, `scripts/make-icon.js`, regenerated `icon.png`/`icon.ico`, header badge. Route: inline. Evidence: `373551d` plus the `d`+`T` ligature pass.
-- [x] T8 `S11` — `main.js`, `renderer/styles.css`, `renderer/capture/capture.css`: full retro neon dark palette across main and capture windows. Route: inline. Evidence: `fada4b9`, 136 checks passing, node --check clean.
+- [x] T8 `S11` — `main.js`, `renderer/styles.css`, `renderer/capture/capture.css`: full retro neon dark palette across main and capture windows. Route: inline. Evidence: `a160371`, 136 checks passing, node --check clean.
+- [x] T9 — Version bump to 2.0.0 in `package.json`, `package-lock.json` and `README.md`, preparing delivery to `main`, packaging and GitHub repo rename. Route: inline.
 
 ## Log
 
@@ -45,3 +46,4 @@
 - L13 (user, verbatim): "que haya aristas y pixelado". La marca se rasteriza a una rejilla de 32x32 y se emite como rectangulos con `shape-rendering: crispEdges`; el badge del header usa el mismo par y una monoespaciada.
 - L14 (user, verbatim): "vamos a rediseñarlo, que sea una d pixelada solo". La marca es una unica `d` minuscula en pixeles: anillo y asta derecho como un solo trazo, sin T ni diagonal. El badge baja a `d`.
 - L15 (decision): la paleta retro (#0b0f0d y #6ee787) se aplica a la interfaz completa: fondo de ventanas en `main.js`, y temas oscuros unificados en `renderer/styles.css` y `renderer/capture/capture.css` (superficies, bordes, scrollbars, botones, inputs y dialogos).
+- L16 (user, verbatim): "Cambia version, documentacion, mergea rama a main, sube a github, genera los paquetes. Cambia el repositorio de github al nuevo nombre." La version sube a 2.0.0 al consolidar el renombramiento y cambio de AppUserModelId.

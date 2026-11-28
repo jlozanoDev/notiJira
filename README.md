@@ -4,9 +4,9 @@ desTajo (antes **NotiJira**) es una aplicación de escritorio para Windows con h
 
 ## Descargar
 
-Hasta la versión 1.2.0 la aplicación se llamó **NotiJira**. A partir del renombrado, los instaladores se publican como `desTajo Setup <versión>.exe` y `desTajo <versión>.exe`.
+Hasta la versión 1.2.0 la aplicación se llamó **NotiJira**. A partir de la versión 2.0.0, la aplicación pasa a ser **desTajo** y los instaladores se publican como `desTajo Setup <versión>.exe` y `desTajo <versión>.exe`.
 
-[Descargar NotiJira v1.2.0 en GitHub](https://github.com/jlozanoDev/notiJira/releases/tag/v1.2.0). En **Assets**, elige `NotiJira.Setup.1.2.0.exe` para instalar o `NotiJira.1.2.0.exe` para usar la versión portable.
+[Descargar desTajo v2.0.0 en GitHub](https://github.com/jlozanoDev/destajo/releases/tag/v2.0.0). En **Assets**, elige `desTajo.Setup.2.0.0.exe` para instalar o `desTajo.2.0.0.exe` para usar la versión portable.
 
 ## Ruta rápida
 
