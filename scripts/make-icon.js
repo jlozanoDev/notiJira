@@ -3,10 +3,10 @@ const fs = require('fs');
 const path = require('path');
 
 const assetsDir = path.join(__dirname, '..', 'assets');
-const svg = fs.readFileSync(path.join(assetsDir, 'jira.svg'), 'utf-8');
+const svg = fs.readFileSync(path.join(assetsDir, 'destajo.svg'), 'utf-8');
 
 const size = 512;
-const logoSize = Math.round(size * 0.72);
+const logoSize = size;
 
 const html = `<!DOCTYPE html>
 <html>

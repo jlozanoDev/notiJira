@@ -6,7 +6,11 @@ const fs = require('fs');
 
 const handlers = {};
 const clipboardState = { text: '' };
-const userData = path.join(os.tmpdir(), 'notijira-check-userdata');
+const userData = path.join(os.tmpdir(), 'destajo-check-userdata');
+const paths = {
+  userData,
+  appData: path.join(os.tmpdir(), 'destajo-check-appdata'),
+};
 
 // Atajos globales: se puede forzar que un registro falle para comprobar que el
 // anterior se conserva (S7). `__shortcuts` expone el estado a las comprobaciones.
@@ -40,10 +44,10 @@ const appListeners = {};
 const app = {
   commandLine: { appendSwitch: noop },
   isPackaged: false,
-  getName: () => 'NotiJira',
+  getName: () => 'desTajo',
   getVersion: () => '0.0.0-test',
   setAppUserModelId: noop,
-  getPath: () => userData,
+  getPath: (name) => (name === 'appData' ? paths.appData : paths.userData),
   whenReady: () => new Promise(() => {}),
   on: (type, handler) => {
     (appListeners[type] = appListeners[type] || []).push(handler);
@@ -158,11 +162,19 @@ module.exports = {
     return queued.length;
   },
   __setShortcutFailure: (accelerator) => { shortcutState.failure = accelerator || null; },
-  __userData: userData,
+  __paths: paths,
   __reset: () => {
     clipboardState.text = '';
     shortcutState.failure = null;
     loginCalls.length = 0;
-    fs.rmSync(userData, { recursive: true, force: true });
+    fs.rmSync(paths.userData, { recursive: true, force: true });
+    fs.rmSync(paths.appData, { recursive: true, force: true });
   },
 };
+
+// La ruta se lee siempre desde `paths`: las comprobaciones pueden reapuntarla
+// antes de cargar main.js.
+Object.defineProperty(module.exports, '__userData', {
+  get: () => paths.userData,
+  enumerable: true,
+});

@@ -18,6 +18,51 @@ const { adfToMarkdown, collectMedia } = require('./adf');
 
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
+// El renombrado de NotiJira a desTajo cambia la carpeta de datos de usuario,
+// porque Electron la deriva del nombre de la app. Se copia una sola vez lo que
+// el usuario ya tenia (configuracion, incidencias y copias) para no perderlo.
+// Nunca se mueve ni se sobrescribe: si la carpeta nueva ya tiene configuracion,
+// la migracion no hace nada.
+function migrateLegacyUserData() {
+  const target = app.getPath('userData');
+  const marker = path.join(target, '.renamed-from-notijira');
+  try {
+    if (fs.existsSync(path.join(target, 'config.json')) || fs.existsSync(marker)) {
+      return;
+    }
+
+    const appData = app.getPath('appData');
+    const entries = ['config.json', 'bugs', 'copied'];
+
+    for (const legacyName of ['NotiJira', 'notijira']) {
+      const source = path.join(appData, legacyName);
+      if (source === target || !fs.existsSync(source)) continue;
+
+      let copied = false;
+      fs.mkdirSync(target, { recursive: true });
+      for (const entry of entries) {
+        const from = path.join(source, entry);
+        if (!fs.existsSync(from)) continue;
+        fs.cpSync(from, path.join(target, entry), {
+          recursive: true,
+          force: false,
+          errorOnExist: false,
+        });
+        copied = true;
+      }
+      if (!copied) continue;
+
+      fs.writeFileSync(marker, legacyName, 'utf-8');
+      return;
+    }
+  } catch (err) {
+    // Un fallo aqui no debe impedir el arranque: la app empieza sin datos previos.
+    console.error('No se pudo migrar la configuracion anterior:', err.message);
+  }
+}
+
+migrateLegacyUserData();
+
 let mainWindow;
 
 function configPath() {
@@ -1412,7 +1457,7 @@ function showCaptureWindow() {
       autoHideMenuBar: true,
       show: false,
       title: 'Capturar incidencia',
-      backgroundColor: '#ffffff',
+      backgroundColor: '#0b0f0d',
       webPreferences: {
         preload: path.join(__dirname, 'renderer', 'capture', 'capture-preload.js'),
         contextIsolation: true,
@@ -1458,11 +1503,11 @@ function createTray() {
     tray = null;
     return;
   }
-  tray.setToolTip('NotiJira');
+  tray.setToolTip('desTajo');
   tray.setContextMenu(
     Menu.buildFromTemplate([
       { label: 'Capturar incidencia', click: () => showCaptureWindow() },
-      { label: 'Abrir NotiJira', click: () => showMainWindow() },
+      { label: 'Abrir desTajo', click: () => showMainWindow() },
       { type: 'separator' },
       {
         label: 'Salir',
@@ -1798,7 +1843,7 @@ function showNotification(title, body, url) {
   if (!Notification.isSupported()) return false;
 
   const notification = new Notification({
-    title: title || 'NotiJira',
+    title: title || 'desTajo',
     body: body || '',
     icon: path.join(__dirname, 'assets', 'icon.png'),
   });
@@ -1839,14 +1884,14 @@ function setupUpdater() {
   autoUpdater.on('update-available', (info) => {
     showNotification(
       'Actualizacion disponible',
-      `Descargando NotiJira ${info.version}...`
+      `Descargando desTajo ${info.version}...`
     );
   });
 
   autoUpdater.on('update-downloaded', (info) => {
     showNotification(
       'Actualizacion lista',
-      `NotiJira ${info.version} se instalara al cerrar la aplicacion.`
+      `desTajo ${info.version} se instalara al cerrar la aplicacion.`
     );
   });
 
@@ -1871,8 +1916,8 @@ function createWindow() {
     height: 780,
     minWidth: 720,
     minHeight: 520,
-    title: 'NotiJira',
-    backgroundColor: '#f4f5f7',
+    title: 'desTajo',
+    backgroundColor: '#0b0f0d',
     icon: path.join(
       __dirname,
       'assets',
@@ -1910,7 +1955,7 @@ if (!hasSingleInstanceLock) {
 
 app.whenReady().then(() => {
   if (process.platform === 'win32') {
-    app.setAppUserModelId('com.notijira.app');
+    app.setAppUserModelId('com.destajo.app');
   }
   const config = readConfig();
   applyBugShortcut((config && config.bugHotkey) || DEFAULT_BUG_HOTKEY);

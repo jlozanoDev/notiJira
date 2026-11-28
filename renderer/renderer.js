@@ -90,13 +90,19 @@ const els = {
 };
 
 const POLL_INTERVAL_MS = 5 * 60 * 1000;
-const READ_IDS_KEY = 'notijira:readIds';
+const READ_IDS_KEY = 'destajo:readIds';
+const LEGACY_READ_IDS_KEY = 'notijira:readIds';
 const SEARCH_MIN_CHARS = 2;
 
 function loadReadIds() {
   try {
-    const raw = localStorage.getItem(READ_IDS_KEY);
+    const stored = localStorage.getItem(READ_IDS_KEY);
+    const raw =
+      stored === null ? localStorage.getItem(LEGACY_READ_IDS_KEY) : stored;
     const parsed = raw ? JSON.parse(raw) : [];
+    // La clave cambio con el renombrado: se copia una sola vez para no perder
+    // que menciones ya estaban leidas.
+    if (stored === null && raw) localStorage.setItem(READ_IDS_KEY, raw);
     return new Set(Array.isArray(parsed) ? parsed : []);
   } catch (err) {
     return new Set();
