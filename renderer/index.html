@@ -102,115 +102,229 @@
     </main>
 
     <div id="modal" class="modal-overlay hidden">
-      <div class="modal">
-        <h2>Configuracion de Jira</h2>
-        <form id="configForm">
-          <label>
-            URL de Jira
-            <input
-              id="baseUrl"
-              type="text"
-              placeholder="https://tuempresa.atlassian.net"
-              required
-            />
-          </label>
-          <label>
-            Email
-            <input
-              id="email"
-              type="email"
-              placeholder="tu@empresa.com"
-            />
-            <small
-              >En Jira Cloud es el email de tu cuenta. Dejalo vacio si usas un
-              Personal Access Token de Jira Server/Data Center.</small
-            >
-          </label>
-          <label>
-            API token / Personal Access Token
-            <input id="apiToken" type="password" placeholder="********" required />
-            <small
-              >Cloud: crea un API token en
-              https://id.atlassian.com/manage-profile/security/api-tokens</small
-            >
-          </label>
-          <label>
-            URL de actualizaciones (opcional)
-            <input
-              id="updateUrl"
-              type="url"
-              placeholder="https://tu-servidor/desTajo/"
-            />
-            <small
-              >URL HTTP donde alojas los archivos de la carpeta dist
-              (latest.yml y el .exe). Dejalo vacio para no comprobar
-              actualizaciones.</small
-            >
-          </label>
-          <section class="settings-section" aria-labelledby="gitlabSettingsTitle">
-            <h3 id="gitlabSettingsTitle">GitLab</h3>
-            <label>
-              URL de GitLab
-              <input
-                id="gitlabUrl"
-                type="url"
-                placeholder="https://gitlab.com"
-                autocomplete="url"
-              />
-            </label>
-            <label>
-              Token de acceso de GitLab
-              <input
-                id="gitlabToken"
-                type="password"
-                placeholder="********"
-                autocomplete="new-password"
-              />
-              <small>Se utiliza para consultar los proyectos y ramas a los que tienes acceso.</small>
-            </label>
-            <div class="credential-actions">
-              <button type="button" id="saveGitlabCredentialsBtn" class="btn btn-secondary">
-                Guardar credenciales de GitLab
-              </button>
-              <button type="button" id="removeGitlabCredentialsBtn" class="btn btn-ghost">
-                Eliminar credenciales de GitLab
-              </button>
-            </div>
-          </section>
-          <section class="settings-section" aria-labelledby="bugSettingsTitle">
-            <h3 id="bugSettingsTitle">Captura rapida</h3>
-            <label>
-              Atajo para capturar
-              <input
-                id="bugHotkey"
-                type="text"
-                readonly
-                placeholder="Pulsa una combinacion"
-                autocomplete="off"
-              />
-              <small
-                >Haz clic aqui y pulsa la combinacion (por defecto Ctrl+Alt+J).
-                Funciona con cualquier aplicacion en primer plano. Esc vacia el
-                campo y vuelve al atajo predeterminado. Si el atajo esta
-                ocupado se conserva el anterior y se avisa.</small
-              >
-            </label>
-            <label class="copy-option">
-              <input id="bugStartAtLogin" type="checkbox" />
-              <span>Arrancar con Windows</span>
-            </label>
-          </section>
-          <div id="formMessage" class="form-message"></div>
-          <div class="modal-actions">
-            <button type="button" id="testBtn" class="btn btn-secondary">
-              Probar conexion
+      <div class="modal modal-settings">
+        <form id="configForm" class="settings-layout">
+          <aside class="settings-sidebar">
+            <button type="button" id="settingsBackBtn" class="settings-back-btn">
+              <span class="back-icon" aria-hidden="true">&larr;</span> Volver a la aplicacion
             </button>
-            <div class="spacer"></div>
-            <button type="button" id="cancelBtn" class="btn btn-ghost">
-              Cancelar
-            </button>
-            <button type="submit" class="btn btn-primary">Guardar</button>
-          </div>
+            <nav class="settings-nav" aria-label="Categorias de configuracion">
+              <button type="button" class="settings-nav-item active" data-tab="jira">
+                <span class="nav-icon" aria-hidden="true">&#9679;</span> Cuenta de Jira
+              </button>
+              <button type="button" class="settings-nav-item" data-tab="git">
+                <span class="nav-icon" aria-hidden="true">&#9881;</span> Proveedores Git
+              </button>
+              <button type="button" class="settings-nav-item" data-tab="capture">
+                <span class="nav-icon" aria-hidden="true">&#9889;</span> Captura rapida
+              </button>
+              <button type="button" class="settings-nav-item" data-tab="updates">
+                <span class="nav-icon" aria-hidden="true">&#8635;</span> Actualizaciones
+              </button>
+              <button type="button" class="settings-nav-item" data-tab="about">
+                <span class="nav-icon" aria-hidden="true">&#9432;</span> Acerca de
+              </button>
+            </nav>
+          </aside>
+
+          <main class="settings-content">
+            <!-- Panel Jira -->
+            <section class="settings-panel" data-panel="jira">
+              <header class="settings-panel-header">
+                <h2>Configuracion de Jira</h2>
+                <p class="settings-subtitle">Conecta con tu instancia de Jira Cloud o Jira Server/Data Center para recibir avisos de menciones.</p>
+              </header>
+              <div class="settings-card">
+                <label>
+                  URL de Jira
+                  <input
+                    id="baseUrl"
+                    type="text"
+                    placeholder="https://tuempresa.atlassian.net"
+                    required
+                  />
+                </label>
+                <label>
+                  Email
+                  <input
+                    id="email"
+                    type="email"
+                    placeholder="tu@empresa.com"
+                  />
+                  <small
+                    >En Jira Cloud es el email de tu cuenta. Dejalo vacio si usas un
+                    Personal Access Token de Jira Server/Data Center.</small
+                  >
+                </label>
+                <label>
+                  API token / Personal Access Token
+                  <input id="apiToken" type="password" placeholder="********" required />
+                  <small
+                    >Cloud: crea un API token en
+                    https://id.atlassian.com/manage-profile/security/api-tokens</small
+                  >
+                </label>
+              </div>
+            </section>
+
+            <!-- Panel Proveedores Git (GitLab y GitHub) -->
+            <section class="settings-panel hidden" data-panel="git">
+              <header class="settings-panel-header">
+                <h2>Proveedores Git</h2>
+                <p class="settings-subtitle">Configura tus credenciales de GitLab y GitHub para obtener diffs de Merge Requests y Pull Requests al copiar tareas.</p>
+              </header>
+              <div class="settings-card">
+                <h3 id="gitlabSettingsTitle">GitLab</h3>
+                <label>
+                  URL de GitLab
+                  <input
+                    id="gitlabUrl"
+                    type="url"
+                    placeholder="https://gitlab.com"
+                    autocomplete="url"
+                  />
+                </label>
+                <label>
+                  Token de acceso de GitLab
+                  <input
+                    id="gitlabToken"
+                    type="password"
+                    placeholder="********"
+                    autocomplete="new-password"
+                  />
+                  <small>Personal Access Token con permiso de lectura de API.</small>
+                </label>
+                <div class="credential-actions">
+                  <button type="button" id="saveGitlabCredentialsBtn" class="btn btn-secondary">
+                    Guardar credenciales de GitLab
+                  </button>
+                  <button type="button" id="removeGitlabCredentialsBtn" class="btn btn-ghost">
+                    Eliminar credenciales de GitLab
+                  </button>
+                </div>
+              </div>
+
+              <div class="settings-card">
+                <h3 id="githubSettingsTitle">GitHub</h3>
+                <label>
+                  URL de la API de GitHub (opcional)
+                  <input
+                    id="githubUrl"
+                    type="url"
+                    placeholder="https://api.github.com"
+                    autocomplete="url"
+                  />
+                  <small>Por defecto https://api.github.com. Personalizalo si usas GitHub Enterprise Server.</small>
+                </label>
+                <label>
+                  Token de acceso de GitHub
+                  <input
+                    id="githubToken"
+                    type="password"
+                    placeholder="ghp_********"
+                    autocomplete="new-password"
+                  />
+                  <small>Personal Access Token (classic con permiso 'repo' o fine-grained con lectura de repositorios).</small>
+                </label>
+                <div class="credential-actions">
+                  <button type="button" id="saveGithubCredentialsBtn" class="btn btn-secondary">
+                    Guardar credenciales de GitHub
+                  </button>
+                  <button type="button" id="removeGithubCredentialsBtn" class="btn btn-ghost">
+                    Eliminar credenciales de GitHub
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            <!-- Panel Captura rapida -->
+            <section class="settings-panel hidden" data-panel="capture">
+              <header class="settings-panel-header">
+                <h2 id="bugSettingsTitle">Captura rapida</h2>
+                <p class="settings-subtitle">Atajo global de teclado para registrar incidencias y arranque con Windows.</p>
+              </header>
+              <div class="settings-card">
+                <label>
+                  Atajo para capturar
+                  <input
+                    id="bugHotkey"
+                    type="text"
+                    readonly
+                    placeholder="Pulsa una combinacion"
+                    autocomplete="off"
+                  />
+                  <small
+                    >Haz clic aqui y pulsa la combinacion (por defecto Ctrl+Alt+J).
+                    Funciona con cualquier aplicacion en primer plano. Esc vacia el
+                    campo y vuelve al atajo predeterminado. Si el atajo esta
+                    ocupado se conserva el anterior y se avisa.</small
+                  >
+                </label>
+                <label class="copy-option">
+                  <input id="bugStartAtLogin" type="checkbox" />
+                  <span>Arrancar con Windows</span>
+                </label>
+              </div>
+            </section>
+
+            <!-- Panel Actualizaciones -->
+            <section class="settings-panel hidden" data-panel="updates">
+              <header class="settings-panel-header">
+                <h2>Actualizaciones</h2>
+                <p class="settings-subtitle">Gestion del canal de actualizaciones automaticas de la aplicacion.</p>
+              </header>
+              <div class="settings-card">
+                <label>
+                  URL de actualizaciones (opcional)
+                  <input
+                    id="updateUrl"
+                    type="url"
+                    placeholder="https://tu-servidor/desTajo/"
+                  />
+                  <small
+                    >URL HTTP donde alojas los archivos de la carpeta dist
+                    (latest.yml y el .exe). Dejalo vacio para no comprobar
+                    actualizaciones.</small
+                  >
+                </label>
+              </div>
+            </section>
+
+            <!-- Panel Acerca de -->
+            <section class="settings-panel hidden" data-panel="about">
+              <header class="settings-panel-header">
+                <h2>Acerca de desTajo</h2>
+                <p class="settings-subtitle">Herramientas de desarrollo agiles para Jira, Git y reporte de incidencias.</p>
+              </header>
+              <div class="settings-card about-card">
+                <div class="about-brand">
+                  <span class="about-logo">d</span>
+                  <div class="about-info">
+                    <strong>desTajo</strong>
+                    <span class="about-version">Version 2.1.0</span>
+                  </div>
+                </div>
+                <p class="about-desc">
+                  Aplicacion de escritorio construida en Electron. Gestion local, sin telemetria y respetando tu privacidad.
+                </p>
+              </div>
+            </section>
+
+            <!-- Footer con estado y acciones -->
+            <footer class="settings-footer">
+              <div id="formMessage" class="form-message"></div>
+              <div class="modal-actions">
+                <button type="button" id="testBtn" class="btn btn-secondary">
+                  Probar conexion
+                </button>
+                <div class="spacer"></div>
+                <button type="button" id="cancelBtn" class="btn btn-ghost">
+                  Cancelar
+                </button>
+                <button type="submit" class="btn btn-primary">Guardar</button>
+              </div>
+            </footer>
+          </main>
         </form>
       </div>
     </div>
@@ -259,10 +373,14 @@
           <h2 id="copyTitle">Copiar tarea</h2>
           <label class="copy-option">
             <input id="includeMrCheckbox" type="checkbox" />
-            <span>Obtener MR</span>
+            <span>Obtener diff (MR / PR)</span>
           </label>
         </div>
         <p id="copySubtitle" class="copy-subtitle">Cargando...</p>
+        <div id="gitProviderTabs" class="git-provider-tabs hidden">
+          <button type="button" class="provider-tab active" data-provider="gitlab">GitLab</button>
+          <button type="button" class="provider-tab" data-provider="github">GitHub</button>
+        </div>
         <div id="gitlabSelection" class="gitlab-selection hidden">
           <div class="combo">
             <label for="gitlabProjectInput">Proyecto de GitLab</label>
@@ -327,7 +445,72 @@
             </div>
           </div>
         </div>
+        <div id="githubSelection" class="gitlab-selection hidden">
+          <div class="combo">
+            <label for="githubRepoInput">Repositorio de GitHub</label>
+            <input
+              id="githubRepoInput"
+              class="combo-input"
+              type="text"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="githubRepoList"
+              aria-expanded="false"
+              autocomplete="off"
+              disabled
+            />
+            <ul
+              id="githubRepoList"
+              class="combo-list hidden"
+              role="listbox"
+              aria-label="Repositorios de GitHub"
+            ></ul>
+          </div>
+          <div class="branch-selectors">
+            <div class="combo">
+              <label for="githubSourceBranchInput">Rama de origen</label>
+              <input
+                id="githubSourceBranchInput"
+                class="combo-input"
+                type="text"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls="githubSourceBranchList"
+                aria-expanded="false"
+                autocomplete="off"
+                disabled
+              />
+              <ul
+                id="githubSourceBranchList"
+                class="combo-list hidden"
+                role="listbox"
+                aria-label="Ramas de origen"
+              ></ul>
+            </div>
+            <div class="combo">
+              <label for="githubTargetBranchInput">Rama de destino</label>
+              <input
+                id="githubTargetBranchInput"
+                class="combo-input"
+                type="text"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-controls="githubTargetBranchList"
+                aria-expanded="false"
+                autocomplete="off"
+                disabled
+              />
+              <ul
+                id="githubTargetBranchList"
+                class="combo-list hidden"
+                role="listbox"
+                aria-label="Ramas de destino"
+              ></ul>
+            </div>
+          </div>
+        </div>
         <div id="gitlabMessage" class="form-message"></div>
+        <div id="githubMessage" class="form-message"></div>
         <div class="copy-toolbar">
           <button type="button" id="selectAllBtn" class="btn btn-ghost">
             Seleccionar todo
