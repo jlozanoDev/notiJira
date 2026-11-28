@@ -1457,7 +1457,7 @@ function showCaptureWindow() {
       autoHideMenuBar: true,
       show: false,
       title: 'Capturar incidencia',
-      backgroundColor: '#ffffff',
+      backgroundColor: '#0b0f0d',
       webPreferences: {
         preload: path.join(__dirname, 'renderer', 'capture', 'capture-preload.js'),
         contextIsolation: true,
@@ -1917,7 +1917,7 @@ function createWindow() {
     minWidth: 720,
     minHeight: 520,
     title: 'desTajo',
-    backgroundColor: '#f4f5f7',
+    backgroundColor: '#0b0f0d',
     icon: path.join(
       __dirname,
       'assets',
