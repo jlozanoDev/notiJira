@@ -2134,10 +2134,15 @@ function configureUpdater() {
   const updateUrl = (config && config.updateUrl ? config.updateUrl : '').trim();
 
   if (updateUrl) {
+    // URL personalizada: servidor genérico (self-hosted)
     autoUpdater.setFeedURL({
       provider: 'generic',
       url: updateUrl.replace(/\/+$/, '') + '/',
     });
+  } else {
+    // Sin URL custom: usar provider del package.json (GitHub)
+    // Forzamos reset para limpiar cualquier feed URL anterior
+    autoUpdater.setFeedURL({ provider: 'github', owner: 'jlozanoDev', repo: 'destajo' });
   }
 }
 
