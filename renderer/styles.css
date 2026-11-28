@@ -73,8 +73,7 @@ body {
   display: grid;
   place-items: center;
   font-weight: 700;
-  font-size: 15px;
-  letter-spacing: -0.5px;
+  font-size: 17px;
   font-family: "Cascadia Mono", Consolas, "Courier New", monospace;
 }
 

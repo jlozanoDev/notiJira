@@ -8,7 +8,7 @@
 - **S1** — The visible application name is `desTajo`: window title, header title and logo badge, tray tooltip, tray menu entry, default notification title, updater messages.
 - **S2** — `package.json` holds `name: "destajo"`, top-level `productName: "desTajo"`, `build.appId: "com.destajo.app"`, `build.productName: "desTajo"` and `build.nsis.shortcutName: "desTajo"`.
 - **S9** — The written name is `desTajo` (lowercase `des`, capital `T`) everywhere it is read. `name` and `appId` stay lowercase because they are identifiers.
-- **S10** — The application icon is generated from `assets/destajo.svg` (near-black tile, mint `#6ee787` pixel monogram: the `d` ring, its ascender as the `T` stem, the top bar as the `T` arm, and a diagonal `tajo`), into `icon.png` and `icon.ico`. The header badge uses the same pair (`#0b0f0d` / `#6ee787`) and shows `dT`.
+- **S10** — The application icon is generated from `assets/destajo.svg` (near-black tile, mint `#6ee787` pixel monogram of a single lowercase `d` on a 32x32 grid: the bowl and the right ascender are the same stroke), into `icon.png` and `icon.ico`. The header badge uses the same pair (`#0b0f0d` / `#6ee787`) and shows `d`.
 - **S3** — The user data folder becomes `%APPDATA%\desTajo`. On first run, when the target has no `config.json`, the app copies `config.json`, `bugs/` and `copied/` from `%APPDATA%\NotiJira` or `%APPDATA%\notijira` when present. It copies, never moves, and never overwrites an existing file.
 - **S4** — Read state migrates once from the `localStorage` key `notijira:readIds` to `destajo:readIds`.
 - **S5** — `app.setAppUserModelId` uses `com.destajo.app`.
@@ -41,3 +41,4 @@
 - L11 (user, verbatim): "inspirate en este logo" (monograma `dV` en verde neon sobre negro). La marca pasa a una sola silueta de un solo color, sin huecos ni segundo tono.
 - L12 (user, verbatim): "pero que simbolice retro, y estilos y colores, respetalos". Paleta del referente: fondo `#0b0f0d` y marca `#6ee787` con halo.
 - L13 (user, verbatim): "que haya aristas y pixelado". La marca se rasteriza a una rejilla de 32x32 y se emite como rectangulos con `shape-rendering: crispEdges`; el badge del header usa el mismo par y una monoespaciada.
+- L14 (user, verbatim): "vamos a rediseñarlo, que sea una d pixelada solo". La marca es una unica `d` minuscula en pixeles: anillo y asta derecho como un solo trazo, sin T ni diagonal. El badge baja a `d`.
