@@ -6,7 +6,7 @@ desTajo (antes **NotiJira**) es una aplicación de escritorio para Windows con h
 
 Hasta la versión 1.2.0 la aplicación se llamó **NotiJira**. A partir de la versión 2.0.0, la aplicación pasa a ser **desTajo** y los instaladores se publican como `desTajo Setup <versión>.exe` y `desTajo <versión>.exe`.
 
-[Descargar desTajo v2.0.0 en GitHub](https://github.com/jlozanoDev/destajo/releases/tag/v2.0.0). En **Assets**, elige `desTajo.Setup.2.0.0.exe` para instalar o `desTajo.2.0.0.exe` para usar la versión portable.
+[Descargar desTajo v2.1.0 en GitHub](https://github.com/jlozanoDev/destajo/releases/tag/v2.1.0). En **Assets**, elige `desTajo.Setup.2.1.0.exe` para instalar o `desTajo.2.1.0.exe` para usar la versión portable.
 
 ## Ruta rápida
 
@@ -14,7 +14,7 @@ Hasta la versión 1.2.0 la aplicación se llamó **NotiJira**. A partir de la ve
 2. `npm start`
 3. Pulsa **Configuracion** e introduce la URL de tu Jira, tu email y tu API token.
 4. Pulsa **Probar conexion** y después **Guardar**.
-5. Opcionalmente, configura la URL HTTPS y el token de GitLab en el apartado **GitLab** para incluir diffs de ramas al copiar una tarea.
+5. Opcionalmente, configura la URL HTTPS y el token de GitLab en el apartado **Proveedores Git → GitLab**, y/o el token de GitHub en **Proveedores Git → GitHub** para incluir diffs de MR/PR al copiar una tarea.
 6. Para apuntar un bug desde cualquier aplicación, pulsa `Ctrl+Alt+J` (se cambia en **Configuracion → Captura rapida**) o el icono de la bandeja.
 
 Desde ese momento la app revisa tus menciones cada 5 minutos y muestra una notificación nativa (con sonido) cuando aparece una nueva.
@@ -35,15 +35,30 @@ Con email, la app envía `Basic <email:token>`; sin email, envía `Bearer <token
 
 El token de Jira se guarda en texto plano en `config.json` dentro de la carpeta de datos de usuario de la aplicación. No se registra en logs ni se envía a ningún sitio que no sea tu propio Jira.
 
-## GitLab
+## Proveedores Git (GitLab + GitHub)
 
-En **Configuracion → GitLab**, introduce la URL HTTPS de tu instancia y un token de acceso con permiso `api`. La aplicación busca en GitLab los proyectos accesibles para ese token y, al marcar **Obtener MR** al copiar una tarea, puedes escribir en los buscadores de proyecto, rama de origen y rama de destino: cada texto se envía a GitLab (parámetro `search`, con retardo de un cuarto de segundo) y sugiere lo que coincida. Se elige con un clic o con las flechas + `Enter`; `Escape` cierra sin perder la elección anterior. Escribir el nombre completo de una rama también vale, siempre que GitLab lo devuelva tal cual.
+En **Configuracion → Proveedores Git** puedes configurar **GitLab** y **GitHub** de forma independiente:
 
-Al elegir un proyecto, el buscador de origen empieza por la clave de la tarea Jira y el de destino por `develop`. Si GitLab devuelve una rama que coincide exactamente con el valor predeterminado, queda seleccionada automáticamente; si no, puedes elegir otra coincidencia.
+- **GitLab**: introduce la URL HTTPS de tu instancia y un token de acceso con permiso `api`. La aplicación busca en GitLab los proyectos accesibles para ese token.
+- **GitHub**: introduce un Personal Access Token (clásico o fine-grained) con permiso `repo`. La URL por defecto es `https://api.github.com`; puedes cambiarla para GitHub Enterprise Server. El token se valida como secreto y solo se envía a la URL configurada.
 
-Cada búsqueda trae una página de 100 resultados. Si GitLab la llena, el aviso te pide que concretes más el texto.
+Al marcar **Obtener diff (MR / PR)** al copiar una tarea, el comportamiento depende de los proveedores configurados:
 
-El diff de la comparación se añade al final del Markdown copiado. Las credenciales de GitLab se guardan en texto plano junto a la configuración local; puedes eliminarlas desde el mismo apartado. El token se envía únicamente a la URL de GitLab configurada y nunca se incluye en logs ni en el texto copiado. HTTP solo se admite para pruebas en `localhost`.
+- **Solo uno configurado** (GitLab o GitHub): se selecciona automáticamente y muestra sus buscadores sin preguntar.
+- **Ambos configurados**: aparece un selector rápido (GitLab | GitHub) para elegir el proveedor de la tarea; se recuerda la última elección.
+- **Ninguno configurado**: se informa y se redirige a la pantalla de configuración.
+
+Buscadores para **GitLab** (proyecto, rama origen, rama destino) y **GitHub** (repositorio, rama origen, rama destino):
+- Cada texto se envía al proveedor (parámetro `search`, con retardo de un cuarto de segundo) y sugiere lo que coincida.
+- Se elige con un clic o con las flechas + `Enter`; `Escape` cierra sin perder la elección anterior.
+- Al elegir un proyecto/repositorio, el buscador de origen empieza por la clave de la tarea Jira y el de destino por `develop` (o la rama por defecto del repo en GitHub). Si el proveedor devuelve una rama que coincide exactamente, queda seleccionada automáticamente.
+- Cada búsqueda trae una página de 100 resultados. Si el proveedor la llena, el aviso te pide que concretes más el texto.
+
+El diff de la comparación se añade al final del Markdown copiado:
+- **GitLab**: `## Diff de MR — {proyecto} · {origen} → {destino}`
+- **GitHub**: `## Diff de PR — {owner/repo} · {origen} → {destino}`
+
+Las credenciales se guardan en texto plano junto a la configuración local; puedes eliminarlas desde el mismo apartado. Los tokens nunca se incluyen en logs ni en el texto copiado. HTTP solo se admite para pruebas en `localhost`.
 
 ## Capturar incidencias
 
@@ -68,7 +83,7 @@ El atajo es configurable: en **Configuracion → Captura rapida** pulsas la comb
 | Estado de lectura | Se guarda en el equipo (`localStorage`), no en Jira |
 | Abrir en Jira | Al pulsar una tarjeta se abre el comentario en el navegador |
 | Buscar y copiar | Buscador de tareas por clave o texto y copia al portapapeles, en Markdown, de las pestañas y comentarios elegidos, con imágenes y archivos descargados localmente |
-| Diff de GitLab | Al activar **Obtener MR**, buscas el proyecto y las ramas de origen y destino con sugerencias; añade la comparación de origen y destino al final de la copia |
+| Diff de GitLab / GitHub | Al activar **Obtener diff (MR / PR)**, eliges el proveedor (si hay dos) y buscas el proyecto/repositorio y las ramas con sugerencias; añade la comparación al final de la copia |
 | Capturar incidencias | Ventana propia abierta con atajo global desde cualquier aplicación: título, detalles, enlaces clasificados (Slack, Jira, web), imágenes pegadas o arrastradas y borrador al cerrar |
 | Bandeja de incidencias | Listado local con pestañas Pendientes / Creadas / Todas, buscador, contador en la barra, copia como Markdown y registro de la clave de Jira al crear la tarea a mano |
 | Actualizaciones | Comprobación automática cada 6 horas en la versión empaquetada |
@@ -81,8 +96,8 @@ El atajo es configurable: en **Configuracion → Captura rapida** pulsas la comb
 | `npm run pack` | Genera la app sin instalador en `dist/` |
 | `npm run dist` | Genera el instalador NSIS y la versión portable en `dist/` |
 | `npm run check:adf` | Comprueba el conversor ADF→Markdown (13 aserciones) |
-| `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira y un GitLab simulados (34 aserciones) |
-| `npm run check:renderer` | Comprueba la parte de GitLab de la modal de copia con el `renderer.js` real y un DOM simulado (27 aserciones) |
+| `npm run check:copy` | Comprueba el flujo de búsqueda y copia contra un Jira, GitLab y GitHub simulados (51 aserciones) |
+| `npm run check:renderer` | Comprueba la parte de GitLab y GitHub de la modal de copia con el `renderer.js` real y un DOM simulado (27 aserciones) |
 | `npm run check:search` | Comprueba el combo de búsqueda de Jira con el `renderer.js` real y un reloj simulado (10 aserciones) |
 | `npm run check:bugs` | Comprueba la captura, el almacenamiento local y la bandeja de incidencias con los stubs headless (45 aserciones) |
 | `npm run check:rename` | Comprueba que el renombrado conserva la configuración, las incidencias y las copias anteriores (7 aserciones) |

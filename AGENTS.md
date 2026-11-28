@@ -1,6 +1,6 @@
 # AGENTS.md
 
-desTajo (formerly NotiJira) is a single-window Electron app that watches Jira and notifies the user when they are mentioned in a comment, plus a "copy task to Markdown" flow with optional GitLab branch diffs and a local bug inbox. Plain CommonJS, no bundler, no TypeScript.
+desTajo (formerly NotiJira) is a single-window Electron app that watches Jira and notifies the user when they are mentioned in a comment, plus a "copy task to Markdown" flow with optional GitLab/GitHub MR/PR diffs and a local bug inbox. Plain CommonJS, no bundler, no TypeScript.
 
 This file is the portable contract. `.opencode/instructions.md` (loaded through `opencode.json`) holds the architecture map, the IPC contract, and the known traps; restart OpenCode after editing it.
 
@@ -11,8 +11,8 @@ This file is the portable contract. `.opencode/instructions.md` (loaded through 
 | Run the app | `npm start` |
 | Syntax check | `node --check main.js` (also `preload.js`, `adf.js`, `renderer/renderer.js`, `renderer/capture/capture.js`) |
 | ADF→Markdown checks | `npm run check:adf` (13 assertions) |
-| Copy-flow checks (Jira + GitLab) | `npm run check:copy` (34 assertions) |
-| Renderer GitLab checks | `npm run check:renderer` (27 assertions) |
+| Copy-flow checks (Jira + GitLab + GitHub) | `npm run check:copy` (51 assertions) |
+| Renderer GitLab/GitHub checks | `npm run check:renderer` (27 assertions) |
 | Live-search checks | `npm run check:search` (10 assertions) |
 | Bug inbox checks (capture, storage, tray) | `npm run check:bugs` (45 assertions) |
 | Rename migration checks (user data, read state) | `npm run check:rename` (7 assertions) |
@@ -45,7 +45,7 @@ There is no `npm test`, no test framework, and no linter. The six `check:*` scri
 - Anything shipped at runtime must be listed in `build.files` in `package.json` — `adf.js` is there for that reason. An unlisted runtime file is absent from the packaged app with no error.
 - Treat all Jira and GitLab content as untrusted. Build DOM with `createElement` + `textContent`; never interpolate remote data into `innerHTML`.
 - `shell.openExternal` stays restricted to `http:`/`https:` URLs validated in the main process.
-- Jira and GitLab tokens sit in plain text in `app.getPath('userData')/config.json`. Never log them, expose them outside password fields, or commit them. Send the GitLab token only to the configured GitLab URL.
+- Jira, GitLab and GitHub tokens sit in plain text in `app.getPath('userData')/config.json`. Never log them, expose them outside password fields, or commit them. Send the GitLab token only to the configured GitLab URL. Send the GitHub token only to the configured GitHub URL.
 - Keep the CSP in `renderer/index.html` working: no inline `<script>`, no remote script or style origins. `img-src 'self' data:` is required there and in the capture window; the capture window also needs `blob:` because its previews come from `URL.createObjectURL`.
 
 ## Checks run headless, not in Electron
@@ -61,9 +61,15 @@ Need manual verification against a real Jira instance:
 - `buildAuthHeader` and `normalizeBaseUrl` — a wrong output breaks every request without an obvious error. URL normalization exists twice, in `main.js` and in `renderer.js`; change both together.
 - The deliberate fallback chains (`/myself` v3→v2, `/search/jql` POST→`/search` GET, notifications feed→comment scan). Some deployments support only one side.
 - GitLab requests reject redirects so `PRIVATE-TOKEN` cannot leak, and the branch comparison sends the target branch as `from` and the source as `to`.
+- GitHub requests reject redirects so the `Authorization: Bearer` token cannot leak; the branch comparison uses `GET /repos/{owner}/{repo}/compare/{base}...{head}` and prefers `Accept: application/vnd.github.v3.diff` for the unified diff.
 - The copy flow reuses one cached issue payload for 10 minutes: `jira:issueCopyData` fills it and `copy:issue` reads it, so the two must agree on the issue key.
 - `configureUpdater` — a wrong feed URL stops updates silently.
 - Read state is owned by the renderer (`localStorage`, key `destajo:readIds`), not by the main process.
+
+Need manual verification against a real GitHub instance:
+
+- `normalizeGitHubBaseUrl` — ensures HTTPS, defaults to `https://api.github.com`, rejects URLs with credentials. HTTP only allowed for local loopback test servers.
+- GitHub API rate limiting: authenticated users get 5,000 req/hour; the 250 ms debounce and single-page limit are the only guards.
 
 Need manual verification on a real desktop (the OS owns them, the checks can only fake them):
 
