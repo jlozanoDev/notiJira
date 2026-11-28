@@ -735,21 +735,18 @@ els.checkUpdatesBtn.addEventListener('click', async () => {
   els.updateCheckStatus.textContent = 'Buscando...';
   els.updateCheckStatus.className = 'update-check-status';
   try {
-    const { autoUpdater } = require('electron');
-    autoUpdater.checkForUpdates().then((result) => {
-      if (result && result.updateInfo) {
-        els.updateCheckStatus.textContent = `Nueva version: ${result.updateInfo.version}`;
-        els.updateCheckStatus.className = 'update-check-status ok';
-      } else {
-        els.updateCheckStatus.textContent = 'Ya tienes la ultima version';
-        els.updateCheckStatus.className = 'update-check-status ok';
-      }
-      els.checkUpdatesBtn.disabled = false;
-    }).catch((err) => {
-      els.updateCheckStatus.textContent = 'Error: ' + err.message;
+    const result = await window.api.checkForUpdates();
+    if (result.error) {
+      els.updateCheckStatus.textContent = 'Error: ' + result.error;
       els.updateCheckStatus.className = 'update-check-status error';
-      els.checkUpdatesBtn.disabled = false;
-    });
+    } else if (result.updateInfo) {
+      els.updateCheckStatus.textContent = `Nueva version: ${result.updateInfo.version}`;
+      els.updateCheckStatus.className = 'update-check-status ok';
+    } else {
+      els.updateCheckStatus.textContent = result.message || 'Ya tienes la ultima version';
+      els.updateCheckStatus.className = 'update-check-status ok';
+    }
+    els.checkUpdatesBtn.disabled = false;
   } catch (err) {
     els.updateCheckStatus.textContent = 'Error: ' + err.message;
     els.updateCheckStatus.className = 'update-check-status error';

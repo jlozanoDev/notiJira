@@ -43,4 +43,7 @@ contextBridge.exposeInMainWorld('api', {
   saveBugDraft: (draft) => ipcRenderer.invoke('bugs:draft:save', draft),
   clearBugDraft: () => ipcRenderer.invoke('bugs:draft:clear'),
   writeClipboard: (text) => ipcRenderer.invoke('clipboard:writeText', text),
+
+  // Actualizador
+  checkForUpdates: () => ipcRenderer.invoke('updater:check'),
 });

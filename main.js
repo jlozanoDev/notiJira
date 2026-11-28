@@ -2168,6 +2168,21 @@ function setupUpdater() {
     console.error('Error del actualizador:', err.message);
   });
 
+  ipcMain.handle('updater:check', async () => {
+    if (!app.isPackaged) {
+      return { updateInfo: null, message: 'Solo disponible en app empaquetada' };
+    }
+    try {
+      const result = await autoUpdater.checkForUpdates();
+      return {
+        updateInfo: result?.updateInfo || null,
+        message: result?.updateInfo ? `Nueva version: ${result.updateInfo.version}` : 'Ya tienes la ultima version'
+      };
+    } catch (err) {
+      return { updateInfo: null, error: err.message };
+    }
+  });
+
   configureUpdater();
 
   if (!app.isPackaged) return;
